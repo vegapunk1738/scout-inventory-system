@@ -4,7 +4,14 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --minify",
-    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "db:generate": "bunx drizzle-kit generate",
+    "migrate:dev": "wrangler d1 migrations apply scout-stock-db-dev --remote",
+    "migrate:prod": "wrangler d1 migrations apply scout-stock-db --remote --env prod",
+    "deploy:dev": "wrangler deploy",
+    "deploy:prod": "wrangler deploy --env prod",
+    "release:dev": "bun run db:generate && bun run migrate:dev && bun run deploy:dev",
+    "release:prod": "bun run db:generate && bun run migrate:prod && bun run deploy:prod"
   },
   "dependencies": {
     "dotenv": "^17.2.4",
