@@ -2,7 +2,13 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "scout-stock-api",
   "main": "src/index.ts",
-  "compatibility_date": "2026-02-10"
+  "compatibility_date": "2026-02-10",
+  "observability": {
+    "logs": {
+      "enabled": false,
+      "invocation_logs": true
+    }
+  }
   // "compatibility_flags": [
   //   "nodejs_compat"
   // ],
