@@ -17,4 +17,14 @@
 			"remote": true
 		}
 	],
+	"env": {
+		"prod": {
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "scout-stock-db"
+				}
+			]
+		}
+	}
 }
