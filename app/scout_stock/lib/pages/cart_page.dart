@@ -4,6 +4,7 @@ import 'package:scout_stock/theme/app_theme.dart';
 import 'package:scout_stock/widgets/admin_shell.dart';
 import 'dart:math';
 import 'package:scout_stock/widgets/checkout_result_dialog.dart';
+import 'package:scout_stock/widgets/glowing_action_button.dart';
 
 class CartPage extends StatefulWidget {
   const CartPage({super.key});
@@ -122,54 +123,47 @@ class _CartPageState extends State<CartPage> {
                     },
                   ),
           ),
-          _CartBottomBar(
-            totalItems: _totalItems,
-            enabled: !isEmpty,
+          GlowingActionButton(
+            label: 'Confirm Checkout ($_totalItems)',
+            icon: const Icon(Icons.check_rounded),
             loading: _submitting,
-            onConfirm: () async {
-              if (_submitting) return;
-              setState(() => _submitting = true);
+            onPressed: _lines.isEmpty
+                ? null
+                : () async {
+                    setState(() => _submitting = true);
+                    try {
+                      final res = await _checkoutRequest();
+                      if (!mounted) return;
 
-              try {
-                final res = await _checkoutRequest();
-                if (!mounted) return;
-
-                if (res.ok) {
-                  await showCheckoutResultDialog(
-                    context,
-                    child: CheckoutResultDialog.success(
-                      transactionId: res.txnId!,
-                      onFinish: () {
-                        // Clear cart after success
-                        setState(() => _lines.clear());
-
-                        // Optional: jump to Scan tab if inside AdminShell
-                        final idx = AdminShellScope.maybeOf(context);
-                        if (idx != null) idx.value = 0;
-                      },
-                    ),
-                  );
-                } else {
-                  await showCheckoutResultDialog(
-                    context,
-                    child: CheckoutResultDialog.failure(
-                      errorCode: res.error,
-                      onRetry: () {
-                        // just re-trigger confirm
-                        // (user taps Try Again, dialog closes, then we start again)
-                        Future.microtask(
-                          () => _CartPageState()._checkoutRequest(),
+                      if (res.ok) {
+                        await showCheckoutResultDialog(
+                          context,
+                          child: CheckoutResultDialog.success(
+                            transactionId: res.txnId!,
+                            onFinish: () {
+                              setState(() => _lines.clear());
+                              final idx = AdminShellScope.maybeOf(context);
+                              if (idx != null) idx.value = 0;
+                            },
+                          ),
                         );
-                      },
-                      onClose: () {},
-                    ),
-                    barrierDismissible: true,
-                  );
-                }
-              } finally {
-                if (mounted) setState(() => _submitting = false);
-              }
-            },
+                      } else {
+                        await showCheckoutResultDialog(
+                          context,
+                          child: CheckoutResultDialog.failure(
+                            errorCode: res.error,
+                            onRetry: () {
+                              // easiest: just close dialog and user taps Confirm again
+                            },
+                            onClose: () {},
+                          ),
+                          barrierDismissible: true,
+                        );
+                      }
+                    } finally {
+                      if (mounted) setState(() => _submitting = false);
+                    }
+                  },
           ),
         ],
       ),
@@ -481,78 +475,6 @@ class _EmptyCart extends StatelessWidget {
               textAlign: TextAlign.center,
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/* ----------------------------- Bottom bar ----------------------------- */
-
-class _CartBottomBar extends StatelessWidget {
-  const _CartBottomBar({
-    required this.totalItems,
-    required this.enabled,
-    required this.loading,
-    required this.onConfirm,
-  });
-
-  final int totalItems;
-  final bool enabled;
-  final bool loading;
-  final VoidCallback onConfirm;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = Theme.of(context).extension<AppTokens>()!;
-    final t = Theme.of(context).textTheme;
-
-    final canPress = enabled && !loading;
-
-    return SafeArea(
-      top: false,
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(tokens.radiusLg),
-          boxShadow: canPress ? tokens.glowShadow : const [],
-        ),
-        child: SizedBox(
-          width: double.infinity,
-          height: 64,
-          child: FilledButton(
-            onPressed: canPress ? onConfirm : null,
-            style: FilledButton.styleFrom(foregroundColor: Colors.white),
-            child: loading
-                ? const SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2.5),
-                  )
-                : Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'Confirm Checkout',
-                        style: t.labelLarge?.copyWith(color: Colors.white),
-                      ),
-                      const SizedBox(width: 14),
-                      Container(
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.white.withValues(alpha: 0.18),
-                        ),
-                        alignment: Alignment.center,
-                        child: const Icon(
-                          Icons.check_rounded,
-                          color: Colors.white,
-                          size: 18,
-                        ),
-                      ),
-                    ],
-                  ),
-          ),
         ),
       ),
     );

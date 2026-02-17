@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:scout_stock/widgets/glowing_action_button.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/attention_text_field_widget.dart';
@@ -60,7 +61,6 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
 
     FocusScope.of(context).unfocus();
     debugPrint('Entered Bucket Code : $code');
-
   }
 
   @override
@@ -118,36 +118,11 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
         ),
       ),
 
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: AnimatedPadding(
-          duration: const Duration(milliseconds: 150),
-          curve: Curves.easeOut,
-          padding: EdgeInsets.fromLTRB(
-            24,
-            12,
-            24,
-            34 + MediaQuery.of(context).viewInsets.bottom,
-          ),
-          child: _Glow(
-            borderRadius: BorderRadius.circular(tokens.radiusXl),
-            shadows: tokens.glowShadow,
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _openBucket,
-                icon: const Icon(Icons.search),
-                label: const Text('Open Bucket'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(74),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(tokens.radiusXl),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
+      bottomNavigationBar: GlowingActionButton(
+        label: 'Open Bucket',
+        icon: const Icon(Icons.search),
+        onPressed: _openBucket,
+        respectKeyboardInset: true, // keeps the nice lift when keyboard opens
       ),
     );
   }

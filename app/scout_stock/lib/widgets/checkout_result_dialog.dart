@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:scout_stock/theme/app_theme.dart';
+import 'package:scout_stock/widgets/glowing_action_button.dart';
 
 enum CheckoutResultType { success, failure }
 
@@ -76,6 +77,10 @@ class CheckoutResultDialog extends StatelessWidget {
     final statusColor = _isSuccess ? AppColors.primary : Colors.redAccent;
     final ringBg = statusColor.withValues(alpha: _isSuccess ? 0.10 : 0.12);
 
+    final glow = tokens.glowShadow
+        .map((s) => s.copyWith(color: statusColor.withOpacity(s.color.opacity)))
+        .toList();
+
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
@@ -127,24 +132,21 @@ class CheckoutResultDialog extends StatelessWidget {
                 const SizedBox(height: 18),
 
                 // Primary (big) action
-                SizedBox(
-                  width: double.infinity,
+                GlowingFilledButton(
                   height: 62,
-                  child: FilledButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      onPrimary?.call();
-                    },
-                    icon: Icon(_isSuccess ? Icons.check_rounded : Icons.refresh_rounded),
-                    label: Text(primaryLabel),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _isSuccess ? AppColors.primary : Colors.redAccent,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(tokens.radiusLg),
-                      ),
-                    ),
+                  radius:
+                      tokens.radiusLg, // keep dialog tighter than bottom bar
+                  label: primaryLabel,
+                  icon: Icon(
+                    _isSuccess ? Icons.check_rounded : Icons.refresh_rounded,
                   ),
+                  backgroundColor: statusColor,
+                  foregroundColor: Colors.white,
+                  glowShadows: glow,
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    onPrimary?.call();
+                  },
                 ),
 
                 // Secondary action (only for failure)
