@@ -18,7 +18,8 @@ class ScanPage extends StatefulWidget {
   State<ScanPage> createState() => _ScanPageState();
 }
 
-class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
+class _ScanPageState extends State<ScanPage>
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   static const int _scanTabIndex = 0;
 
   late final MobileScannerController _controller;
@@ -30,10 +31,18 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
   // Serialize camera ops to avoid flaky web timing issues.
   Future<void> _cameraQueue = Future.value();
 
-  // Strong guards (don’t rely on controller.value.isRunning on web)
+  // Strong guards (don’t rely on controller.value.isRunning on web only)
   bool _starting = false;
   bool _stopping = false;
   bool _running = false;
+
+  // Camera readiness + snap fade
+  bool _feedReady = false;
+  bool _uiReady = false;
+  bool _fading = false;
+
+  late final AnimationController _blackFade; // 1.0 = black, 0.0 = clear
+  VoidCallback? _controllerListener;
 
   String? _lastRaw;
   DateTime? _lastAt;
@@ -46,12 +55,32 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
+    _blackFade = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+      value: 1.0, // start fully black
+    );
+
     _controller = MobileScannerController(
       autoStart: false,
       detectionSpeed: DetectionSpeed.normal,
       formats: const [BarcodeFormat.code128],
       torchEnabled: false,
     );
+
+    _controllerListener = () {
+      if (!mounted) return;
+      final s = _controller.value;
+
+      final readyNow = s.hasCameraPermission && s.isRunning;
+
+      // When the feed becomes ready, fade from black -> video and then show UI.
+      if (_isActive && readyNow && !_feedReady) {
+        _feedReady = true;
+        _startSnapFade();
+      }
+    };
+    _controller.addListener(_controllerListener!);
   }
 
   @override
@@ -77,11 +106,20 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
     _isActive = shouldBeActive;
 
     if (_isActive) {
+      _resetFadeState();
+
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _isActive) _enqueueCamera(_activateScanner);
       });
     } else {
       _enqueueCamera(_deactivateScanner);
+      if (mounted) {
+        setState(() {
+          _feedReady = false;
+          _uiReady = false;
+        });
+      }
+      _blackFade.value = 1.0;
     }
 
     setState(() {});
@@ -89,6 +127,35 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
 
   void _enqueueCamera(Future<void> Function() task) {
     _cameraQueue = _cameraQueue.then((_) => task()).catchError((_) {});
+  }
+
+  void _resetFadeState() {
+    _feedReady = false;
+    _uiReady = false;
+    _fading = false;
+    _blackFade.value = 1.0; // black cover up immediately
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _startSnapFade() async {
+    if (!mounted) return;
+    if (_fading) return;
+
+    _fading = true;
+
+    // Keep UI hidden until the fade finishes (Snapchat-y)
+    if (mounted) setState(() => _uiReady = false);
+
+    try {
+      await _blackFade.animateTo(0.0, curve: Curves.easeOutCubic);
+    } catch (_) {
+      // ignore animation cancellations
+    } finally {
+      _fading = false;
+      if (mounted && _isActive && _feedReady) {
+        setState(() => _uiReady = true);
+      }
+    }
   }
 
   Future<void> _activateScanner() async {
@@ -103,15 +170,45 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
       // If a stop is in progress, let it finish
       if (_stopping) return;
 
+      // Give UI a frame to paint the black cover before camera start
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+
       await _controller.start();
       _running = true;
+
+      // Fallback: if listener is late, poll briefly then trigger fade.
+      final ready = await _waitUntilVideoRunning(
+        timeout: const Duration(seconds: 2),
+      );
+      if (mounted && _isActive && ready && !_feedReady) {
+        _feedReady = true;
+        _startSnapFade();
+      }
     } catch (e) {
-      // If start fails, allow future retries
       debugPrint('ScanPage: start failed: $e');
       _running = false;
+      if (mounted) {
+        // If start fails, remove black so user isn't stuck (permission overlay still shows).
+        _blackFade.value = 0.0;
+        setState(() {
+          _feedReady = false;
+          _uiReady = true; // allow UI so user can still tap manual entry, etc.
+        });
+      }
     } finally {
       _starting = false;
     }
+  }
+
+  Future<bool> _waitUntilVideoRunning({required Duration timeout}) async {
+    final start = DateTime.now();
+    while (mounted && _isActive) {
+      final s = _controller.value;
+      if (s.hasCameraPermission && s.isRunning) return true;
+      if (DateTime.now().difference(start) > timeout) return false;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    return false;
   }
 
   Future<void> _deactivateScanner() async {
@@ -142,7 +239,6 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
 
     switch (state) {
       case AppLifecycleState.resumed:
-        // resume can fire around the same time as tab change -> queue it
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && _isActive) _enqueueCamera(_activateScanner);
         });
@@ -192,9 +288,14 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
     _navIndex?.removeListener(_onNavIndexChanged);
     _navIndex = null;
 
-    // Best-effort shutdown
+    if (_controllerListener != null) {
+      _controller.removeListener(_controllerListener!);
+      _controllerListener = null;
+    }
+
     unawaited(_deactivateScanner());
     _controller.dispose();
+    _blackFade.dispose();
 
     super.dispose();
   }
@@ -206,6 +307,9 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
 
     // BackdropFilter is expensive on Web. Keep look on mobile, skip blur on web.
     final allowBlur = !kIsWeb;
+
+    // Overlays appear after fade is done (and only when active)
+    final showOverlays = _isActive && _uiReady;
 
     return Scaffold(
       body: LayoutBuilder(
@@ -262,18 +366,19 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
           return Stack(
             fit: StackFit.expand,
             children: [
-              // Camera ONLY when Scan tab is active
-              if (_isActive)
-                RepaintBoundary(
-                  child: MobileScanner(
-                    controller: _controller,
-                    fit: BoxFit.cover,
-                  ),
-                )
-              else
-                const ColoredBox(color: Colors.black),
+              // Keep scanner widget mounted (smoother switching)
+              RepaintBoundary(
+                child: MobileScanner(
+                  controller: _controller,
+                  fit: BoxFit.cover,
+                ),
+              ),
 
-              // Gradient overlay (no full-screen blur)
+              // Hard-hide camera when not active (privacy + avoids last frame)
+              if (!_isActive)
+                const Positioned.fill(child: ColoredBox(color: Colors.black)),
+
+              // Gradient overlay (cheap)
               Positioned.fill(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
@@ -292,84 +397,157 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
                 ),
               ),
 
-              // Top pill
-              Positioned(
-                top: topY,
-                left: sidePad,
-                right: sidePad,
-                height: topRowH,
-                child: Row(
-                  children: [
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: math.min(320.0, w - sidePad * 2),
-                      ),
-                      child: _LastScannedPill(
-                        label: _lastBucketLabel ?? '—',
-                        enabled: _lastBucketLabel != null,
-                        onTap: _lastBucketLabel == null
-                            ? null
-                            : () => debugPrint(
-                                'Open Last Scanned $_lastBucketLabel',
-                              ),
-                      ),
+              // Snapchat-like fade: black cover that fades out when feed is ready.
+              // (Only when active; when inactive we already hard-hide camera.)
+              if (_isActive)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    ignoring: true,
+                    child: AnimatedBuilder(
+                      animation: _blackFade,
+                      builder: (_, __) {
+                        final a = _blackFade.value.clamp(0.0, 1.0);
+                        if (a <= 0.001) return const SizedBox.shrink();
+                        return ColoredBox(
+                          color: Colors.black.withValues(alpha: a),
+                        );
+                      },
                     ),
-                    const Spacer(),
-                  ],
+                  ),
                 ),
-              ),
 
-              // Title
-              Positioned(
-                top: titleY + 20,
-                left: sidePad,
-                right: sidePad,
-                child: Column(
-                  children: [
-                    Text(
-                      'Align barcode within frame',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white.withValues(alpha: 0.92),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                ),
-              ),
-
-              // Scan frame
-              Positioned(
-                top: frameY,
-                left: (w - frameSize) / 2,
-                width: frameSize,
-                height: frameSize,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
+              // --- UI overlays (fade in quickly after snap fade ends) ---
+              AnimatedOpacity(
+                opacity: showOverlays ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOut,
+                child: IgnorePointer(
+                  ignoring: !showOverlays,
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      if (allowBlur)
-                        BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                          child: Container(
-                            color: Colors.black.withValues(alpha: 0.08),
-                          ),
-                        )
-                      else
-                        Container(color: Colors.black.withValues(alpha: 0.14)),
-                      CustomPaint(
-                        painter: _ScanFramePainter(
-                          cornerColor: AppColors.primary,
-                          borderColor: Colors.white.withValues(alpha: 0.42),
+                      // Top pill
+                      Positioned(
+                        top: topY,
+                        left: sidePad,
+                        right: sidePad,
+                        height: topRowH,
+                        child: Row(
+                          children: [
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: math.min(320.0, w - sidePad * 2),
+                              ),
+                              child: _LastScannedPill(
+                                label: _lastBucketLabel ?? '—',
+                                enabled: _lastBucketLabel != null,
+                                onTap: _lastBucketLabel == null
+                                    ? null
+                                    : () => debugPrint(
+                                        'Open Last Scanned $_lastBucketLabel',
+                                      ),
+                              ),
+                            ),
+                            const Spacer(),
+                          ],
                         ),
-                        child: const SizedBox.expand(),
                       ),
-                      Center(
-                        child: Icon(
-                          Icons.add,
-                          size: 34,
-                          color: Colors.white.withValues(alpha: 0.40),
+
+                      // Title
+                      Positioned(
+                        top: titleY + 20,
+                        left: sidePad,
+                        right: sidePad,
+                        child: Column(
+                          children: [
+                            Text(
+                              'Align barcode within frame',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    color: Colors.white.withValues(alpha: 0.92),
+                                  ),
+                            ),
+                            const SizedBox(height: 10),
+                          ],
+                        ),
+                      ),
+
+                      // Scan frame
+                      Positioned(
+                        top: frameY,
+                        left: (w - frameSize) / 2,
+                        width: frameSize,
+                        height: frameSize,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(20),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              if (allowBlur)
+                                BackdropFilter(
+                                  filter: ImageFilter.blur(
+                                    sigmaX: 5,
+                                    sigmaY: 5,
+                                  ),
+                                  child: Container(
+                                    color: Colors.black.withValues(alpha: 0.08),
+                                  ),
+                                )
+                              else
+                                Container(
+                                  color: Colors.black.withValues(alpha: 0.14),
+                                ),
+                              CustomPaint(
+                                painter: _ScanFramePainter(
+                                  cornerColor: AppColors.primary,
+                                  borderColor: Colors.white.withValues(
+                                    alpha: 0.42,
+                                  ),
+                                ),
+                                child: const SizedBox.expand(),
+                              ),
+                              Center(
+                                child: Icon(
+                                  Icons.add,
+                                  size: 34,
+                                  color: Colors.white.withValues(alpha: 0.40),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      // Auto scan pill
+                      Positioned(
+                        top: frameY + frameSize + gapFrameToPill,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: _AutoScanPill(
+                            text: 'AUTO-SCAN ENABLED',
+                            icon: Icons.qr_code_scanner,
+                            tokens: tokens,
+                          ),
+                        ),
+                      ),
+
+                      // Manual entry button
+                      Positioned(
+                        left: sidePad,
+                        right: sidePad,
+                        bottom: manualBottomInset,
+                        height: manualBtnH,
+                        child: _ManualEntryButton(
+                          allowBlur: allowBlur,
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const ManualEntryPage(),
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ],
@@ -377,39 +555,7 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
                 ),
               ),
 
-              // Auto scan pill
-              Positioned(
-                top: frameY + frameSize + gapFrameToPill,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: _AutoScanPill(
-                    text: 'AUTO-SCAN ENABLED',
-                    icon: Icons.qr_code_scanner,
-                    tokens: tokens,
-                  ),
-                ),
-              ),
-
-              // Manual entry button
-              Positioned(
-                left: sidePad,
-                right: sidePad,
-                bottom: manualBottomInset,
-                height: manualBtnH,
-                child: _ManualEntryButton(
-                  allowBlur: allowBlur,
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const ManualEntryPage(),
-                      ),
-                    );
-                  },
-                ),
-              ),
-
-              // Permission helper overlay (only when active)
+              // Permission helper overlay (show whenever active and permission missing)
               if (_isActive)
                 Positioned.fill(
                   child: IgnorePointer(
@@ -426,7 +572,7 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
                               vertical: 12,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.55),
+                              color: Colors.black.withValues(alpha: 0.65),
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
                                 color: Colors.white.withValues(alpha: 0.12),

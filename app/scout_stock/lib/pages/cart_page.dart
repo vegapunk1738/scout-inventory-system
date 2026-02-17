@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:scout_stock/theme/app_theme.dart';
+import 'package:scout_stock/widgets/admin_shell.dart';
+import 'dart:math';
+import 'package:scout_stock/widgets/checkout_result_dialog.dart';
 
 class CartPage extends StatefulWidget {
   const CartPage({super.key});
@@ -10,6 +13,17 @@ class CartPage extends StatefulWidget {
 }
 
 class _CartPageState extends State<CartPage> {
+  bool _submitting = false;
+
+  Future<({bool ok, String? txnId, String? error})> _checkoutRequest() async {
+    // Replace with your real API call.
+    await Future.delayed(const Duration(milliseconds: 650));
+
+    final ok = Random().nextBool(); // demo
+    if (ok) return (ok: true, txnId: '#CH-89204-X', error: null);
+    return (ok: false, txnId: null, error: 'E-CHK-500');
+  }
+
   final List<_CartLine> _lines = [
     _CartLine(
       itemName: 'Coleman 4-Person Tent',
@@ -90,7 +104,7 @@ class _CartPageState extends State<CartPage> {
                 : ListView.separated(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
                     itemCount: _lines.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 14),
+                    separatorBuilder: (_, _) => const SizedBox(height: 14),
                     addAutomaticKeepAlives: false,
                     addRepaintBoundaries: false,
                     itemBuilder: (context, i) {
@@ -111,10 +125,50 @@ class _CartPageState extends State<CartPage> {
           _CartBottomBar(
             totalItems: _totalItems,
             enabled: !isEmpty,
-            onConfirm: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Checkout confirmed')),
-              );
+            loading: _submitting,
+            onConfirm: () async {
+              if (_submitting) return;
+              setState(() => _submitting = true);
+
+              try {
+                final res = await _checkoutRequest();
+                if (!mounted) return;
+
+                if (res.ok) {
+                  await showCheckoutResultDialog(
+                    context,
+                    child: CheckoutResultDialog.success(
+                      transactionId: res.txnId!,
+                      onFinish: () {
+                        // Clear cart after success
+                        setState(() => _lines.clear());
+
+                        // Optional: jump to Scan tab if inside AdminShell
+                        final idx = AdminShellScope.maybeOf(context);
+                        if (idx != null) idx.value = 0;
+                      },
+                    ),
+                  );
+                } else {
+                  await showCheckoutResultDialog(
+                    context,
+                    child: CheckoutResultDialog.failure(
+                      errorCode: res.error,
+                      onRetry: () {
+                        // just re-trigger confirm
+                        // (user taps Try Again, dialog closes, then we start again)
+                        Future.microtask(
+                          () => _CartPageState()._checkoutRequest(),
+                        );
+                      },
+                      onClose: () {},
+                    ),
+                    barrierDismissible: true,
+                  );
+                }
+              } finally {
+                if (mounted) setState(() => _submitting = false);
+              }
             },
           ),
         ],
@@ -439,11 +493,13 @@ class _CartBottomBar extends StatelessWidget {
   const _CartBottomBar({
     required this.totalItems,
     required this.enabled,
+    required this.loading,
     required this.onConfirm,
   });
 
   final int totalItems;
   final bool enabled;
+  final bool loading;
   final VoidCallback onConfirm;
 
   @override
@@ -451,52 +507,28 @@ class _CartBottomBar extends StatelessWidget {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final t = Theme.of(context).textTheme;
 
+    final canPress = enabled && !loading;
+
     return SafeArea(
       top: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-        decoration: const BoxDecoration(
-          color: AppColors.background,
-          boxShadow: [
-            BoxShadow(
-              blurRadius: 20,
-              offset: Offset(0, -8),
-              color: Color(0x11000000),
-            ),
-          ],
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(tokens.radiusLg),
+          boxShadow: canPress ? tokens.glowShadow : const [],
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Text(
-                  'Total Items',
-                  style: t.bodyLarge?.copyWith(
-                    color: AppColors.muted,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '$totalItems',
-                  style: t.headlineMedium?.copyWith(fontSize: 34),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(tokens.radiusLg),
-                boxShadow: enabled ? tokens.glowShadow : const [],
-              ),
-              child: SizedBox(
-                width: double.infinity,
-                height: 64,
-                child: FilledButton(
-                  onPressed: enabled ? onConfirm : null,
-                  style: FilledButton.styleFrom(foregroundColor: Colors.white),
-                  child: Row(
+        child: SizedBox(
+          width: double.infinity,
+          height: 64,
+          child: FilledButton(
+            onPressed: canPress ? onConfirm : null,
+            style: FilledButton.styleFrom(foregroundColor: Colors.white),
+            child: loading
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.5),
+                  )
+                : Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
@@ -520,10 +552,7 @@ class _CartBottomBar extends StatelessWidget {
                       ),
                     ],
                   ),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

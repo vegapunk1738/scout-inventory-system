@@ -41,11 +41,11 @@ class _AdminShellState extends State<AdminShell> {
         extendBody: true, // lets camera show behind glass nav
         body: ValueListenableBuilder<int>(
           valueListenable: _index,
-          builder: (_, i, __) => IndexedStack(index: i, children: widget.pages),
+          builder: (_, i, _) => IndexedStack(index: i, children: widget.pages),
         ),
         bottomNavigationBar: ValueListenableBuilder<int>(
           valueListenable: _index,
-          builder: (_, i, __) => _AdminBottomNav(
+          builder: (_, i, _) => _AdminBottomNav(
             index: i,
             onTap: (next) => _index.value = next,
           ),
@@ -80,7 +80,7 @@ class _AdminBottomNav extends StatelessWidget {
               alignment: Alignment.bottomCenter,
               children: <Widget>[
                 ...previousChildren,
-                if (currentChild != null) currentChild,
+                ?currentChild,
               ],
             );
           },

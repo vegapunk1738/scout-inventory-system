@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:scout_stock/pages/activity_log_admin_page.dart';
 import 'package:scout_stock/pages/cart_page.dart';
 import 'package:scout_stock/pages/scan_page.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 import 'package:scout_stock/widgets/admin_shell.dart';
 
-void main() => runApp(const MyApp());
+void main() {
+  GoogleFonts.config.allowRuntimeFetching = false;
+  runApp(const MyApp());
+}
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
