@@ -1,11 +1,14 @@
+// scan_page.dart
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../theme/app_theme.dart';
+import '../widgets/admin_shell.dart';
 import 'manual_entry_page.dart';
 
 class ScanPage extends StatefulWidget {
@@ -16,15 +19,27 @@ class ScanPage extends StatefulWidget {
 }
 
 class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
+  static const int _scanTabIndex = 0;
+
   late final MobileScannerController _controller;
   StreamSubscription<BarcodeCapture>? _sub;
+
+  ValueNotifier<int>? _navIndex;
+  bool _isActive = false;
+
+  // Serialize camera ops to avoid flaky web timing issues.
+  Future<void> _cameraQueue = Future.value();
+
+  // Strong guards (don’t rely on controller.value.isRunning on web)
+  bool _starting = false;
+  bool _stopping = false;
+  bool _running = false;
 
   String? _lastRaw;
   DateTime? _lastAt;
   String? _lastBucketLabel;
 
-  final int _cartCount = 3;
-  _BottomTab _tab = _BottomTab.scan;
+  static final RegExp _digits = RegExp(r'(\d+)');
 
   @override
   void initState() {
@@ -32,47 +47,123 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
 
     _controller = MobileScannerController(
-      autoStart: true,
+      autoStart: false,
       detectionSpeed: DetectionSpeed.normal,
       formats: const [BarcodeFormat.code128],
-      // Torch is not usable on Flutter Web; don’t surface it in UI.
       torchEnabled: false,
     );
+  }
 
-    _sub = _controller.barcodes.listen(_handleBarcodeCapture);
-    unawaited(_controller.start());
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    final next = AdminShellScope.maybeOf(context);
+    if (!identical(_navIndex, next)) {
+      _navIndex?.removeListener(_onNavIndexChanged);
+      _navIndex = next;
+      _navIndex?.addListener(_onNavIndexChanged);
+    }
+
+    _onNavIndexChanged();
+  }
+
+  void _onNavIndexChanged() {
+    final shouldBeActive = _navIndex == null
+        ? true
+        : _navIndex!.value == _scanTabIndex;
+    if (shouldBeActive == _isActive) return;
+
+    _isActive = shouldBeActive;
+
+    if (_isActive) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _isActive) _enqueueCamera(_activateScanner);
+      });
+    } else {
+      _enqueueCamera(_deactivateScanner);
+    }
+
+    setState(() {});
+  }
+
+  void _enqueueCamera(Future<void> Function() task) {
+    _cameraQueue = _cameraQueue.then((_) => task()).catchError((_) {});
+  }
+
+  Future<void> _activateScanner() async {
+    if (!mounted || !_isActive) return;
+    if (_running || _starting) return;
+
+    _starting = true;
+    try {
+      // Attach listener while active
+      _sub ??= _controller.barcodes.listen(_handleBarcodeCapture);
+
+      // If a stop is in progress, let it finish
+      if (_stopping) return;
+
+      await _controller.start();
+      _running = true;
+    } catch (e) {
+      // If start fails, allow future retries
+      debugPrint('ScanPage: start failed: $e');
+      _running = false;
+    } finally {
+      _starting = false;
+    }
+  }
+
+  Future<void> _deactivateScanner() async {
+    if (_stopping) return;
+
+    _stopping = true;
+    try {
+      // Stop receiving events first (reduces work while hidden)
+      try {
+        await _sub?.cancel();
+      } catch (_) {}
+      _sub = null;
+
+      if (_running || _starting) {
+        try {
+          await _controller.stop();
+        } catch (_) {}
+      }
+      _running = false;
+    } finally {
+      _stopping = false;
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Permission prompts can cause lifecycle changes before the controller is ready.
-    if (!_controller.value.hasCameraPermission) return;
+    if (!_isActive) return;
 
     switch (state) {
       case AppLifecycleState.resumed:
-        _sub ??= _controller.barcodes.listen(_handleBarcodeCapture);
-        unawaited(_controller.start());
+        // resume can fire around the same time as tab change -> queue it
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _isActive) _enqueueCamera(_activateScanner);
+        });
         break;
 
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
       case AppLifecycleState.detached:
-        unawaited(_sub?.cancel());
-        _sub = null;
-        unawaited(_controller.stop());
+        _enqueueCamera(_deactivateScanner);
         break;
     }
   }
 
   void _handleBarcodeCapture(BarcodeCapture capture) {
-    if (!mounted) return;
+    if (!mounted || !_isActive) return;
     if (capture.barcodes.isEmpty) return;
 
     final raw = capture.barcodes.first.rawValue;
     if (raw == null || raw.trim().isEmpty) return;
 
-    // Extra debounce for “fast and forgiving”.
     final now = DateTime.now();
     if (_lastRaw == raw &&
         _lastAt != null &&
@@ -84,23 +175,13 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
     _lastAt = now;
 
     final label = _bucketLabelFromRaw(raw);
-    setState(() => _lastBucketLabel = label);
-
-    // TODO: Replace with your real navigation:
-    // context.go('/bucket/$bucketId');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Scanned $label'),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(milliseconds: 900),
-      ),
-    );
+    if (label != _lastBucketLabel) {
+      setState(() => _lastBucketLabel = label);
+    }
   }
 
   String _bucketLabelFromRaw(String raw) {
-    // Accepts "921", "Bucket-921", "BKT:921", etc.
-    debugPrint('$raw');
-    final m = RegExp(r'(\d+)').firstMatch(raw);
+    final m = _digits.firstMatch(raw);
     if (m != null) return 'Bucket #${m.group(1)}';
     return raw;
   }
@@ -108,9 +189,13 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    unawaited(_sub?.cancel());
-    _sub = null;
-    unawaited(_controller.dispose());
+    _navIndex?.removeListener(_onNavIndexChanged);
+    _navIndex = null;
+
+    // Best-effort shutdown
+    unawaited(_deactivateScanner());
+    _controller.dispose();
+
     super.dispose();
   }
 
@@ -119,37 +204,38 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final safe = MediaQuery.paddingOf(context);
 
+    // BackdropFilter is expensive on Web. Keep look on mobile, skip blur on web.
+    final allowBlur = !kIsWeb;
+
     return Scaffold(
       body: LayoutBuilder(
         builder: (context, c) {
           final w = c.maxWidth;
           final h = c.maxHeight;
 
-          // --- Layout constants (tuned to avoid overflow) ---
+          // --- Layout constants ---
           const sidePad = 16.0;
           const topPad = 10.0;
 
           const topRowH = 56.0;
-          const titleBlockH = 52.0; // title + small spacing
+          const titleBlockH = 52.0;
           const autoPillH = 40.0;
 
           const manualBtnH = 68.0;
-          const bottomNavH = 78.0;
 
           const gapAfterTopRow = 14.0;
           const gapTitleToFrame = 14.0;
           const gapFrameToPill = 12.0;
           const gapPillToBottom = 12.0;
-          const gapManualToNav = 14.0;
-          const bottomPad = 10.0;
+
+          const shellNavHeight = 78.0;
+          const shellNavBottomPad = 12.0;
+
+          const manualBottomInset = 100.0;
 
           final usableH = h - safe.top - safe.bottom;
+          final bottomAreaH = manualBtnH + shellNavHeight + shellNavBottomPad;
 
-          // Bottom area height
-          final bottomAreaH =
-              manualBtnH + gapManualToNav + bottomNavH + bottomPad;
-
-          // How much height can the scan frame take?
           final reservedH =
               topPad +
               topRowH +
@@ -164,52 +250,49 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
           final maxFrameByH = (usableH - reservedH);
           final maxFrameByW = (w - sidePad * 2);
 
-          // Allow it to shrink pretty small on short devices (prevents overflow).
           final frameSize = math
               .min(maxFrameByW, maxFrameByH)
               .clamp(110.0, 420.0)
               .toDouble();
 
-          // Y positions
           final topY = safe.top + topPad;
           final titleY = topY + topRowH + gapAfterTopRow;
           final frameY = titleY + titleBlockH + gapTitleToFrame;
 
-          final navBottom = safe.bottom + bottomPad;
-          final navTop = h - navBottom - bottomNavH;
-
-          final manualBottom = navTop - gapManualToNav;
-          final manualTop = manualBottom - manualBtnH;
-
           return Stack(
             fit: StackFit.expand,
             children: [
-              // Camera
-              MobileScanner(controller: _controller, fit: BoxFit.cover),
+              // Camera ONLY when Scan tab is active
+              if (_isActive)
+                RepaintBoundary(
+                  child: MobileScanner(
+                    controller: _controller,
+                    fit: BoxFit.cover,
+                  ),
+                )
+              else
+                const ColoredBox(color: Colors.black),
 
-              // Soft blur + dark gradient for readability
+              // Gradient overlay (no full-screen blur)
               Positioned.fill(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 1.2, sigmaY: 1.2),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        stops: const [0.0, 0.24, 0.62, 1.0],
-                        colors: [
-                          Colors.black.withOpacity(0.40),
-                          Colors.black.withOpacity(0.10),
-                          Colors.black.withOpacity(0.18),
-                          Colors.black.withOpacity(0.55),
-                        ],
-                      ),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: const [0.0, 0.24, 0.62, 1.0],
+                      colors: [
+                        Colors.black.withValues(alpha: 0.40),
+                        Colors.black.withValues(alpha: 0.10),
+                        Colors.black.withValues(alpha: 0.18),
+                        Colors.black.withValues(alpha: 0.55),
+                      ],
                     ),
                   ),
                 ),
               ),
 
-              // Top row: last scanned (shrink-wrapped)
+              // Top pill
               Positioned(
                 top: topY,
                 left: sidePad,
@@ -219,7 +302,6 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
                   children: [
                     ConstrainedBox(
                       constraints: BoxConstraints(
-                        // prevents it from becoming huge on wide screens
                         maxWidth: math.min(320.0, w - sidePad * 2),
                       ),
                       child: _LastScannedPill(
@@ -227,19 +309,12 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
                         enabled: _lastBucketLabel != null,
                         onTap: _lastBucketLabel == null
                             ? null
-                            : () {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Open ${_lastBucketLabel!}'),
-                                    behavior: SnackBarBehavior.floating,
-                                    duration: const Duration(milliseconds: 800),
-                                  ),
-                                );
-                              },
+                            : () => debugPrint(
+                                'Open Last Scanned $_lastBucketLabel',
+                              ),
                       ),
                     ),
                     const Spacer(),
-                    // If you ever add a right-side button later, it goes here.
                   ],
                 ),
               ),
@@ -255,7 +330,7 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
                       'Align barcode within frame',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white.withOpacity(0.92),
+                        color: Colors.white.withValues(alpha: 0.92),
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -274,14 +349,19 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-                        child: Container(color: Colors.black.withOpacity(0.08)),
-                      ),
+                      if (allowBlur)
+                        BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                          child: Container(
+                            color: Colors.black.withValues(alpha: 0.08),
+                          ),
+                        )
+                      else
+                        Container(color: Colors.black.withValues(alpha: 0.14)),
                       CustomPaint(
                         painter: _ScanFramePainter(
                           cornerColor: AppColors.primary,
-                          borderColor: Colors.white.withOpacity(0.42),
+                          borderColor: Colors.white.withValues(alpha: 0.42),
                         ),
                         child: const SizedBox.expand(),
                       ),
@@ -289,7 +369,7 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
                         child: Icon(
                           Icons.add,
                           size: 34,
-                          color: Colors.white.withOpacity(0.40),
+                          color: Colors.white.withValues(alpha: 0.40),
                         ),
                       ),
                     ],
@@ -297,7 +377,7 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
                 ),
               ),
 
-              // Auto scan pill (purely UI)
+              // Auto scan pill
               Positioned(
                 top: frameY + frameSize + gapFrameToPill,
                 left: 0,
@@ -313,11 +393,12 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
 
               // Manual entry button
               Positioned(
-                top: manualTop,
                 left: sidePad,
                 right: sidePad,
+                bottom: manualBottomInset,
                 height: manualBtnH,
                 child: _ManualEntryButton(
+                  allowBlur: allowBlur,
                   onPressed: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
@@ -328,56 +409,44 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
                 ),
               ),
 
-              // Bottom nav
-              Positioned(
-                top: navTop,
-                left: 12,
-                right: 12,
-                height: bottomNavH,
-                child: _BottomNavBar(
-                  selected: _tab,
-                  cartCount: _cartCount,
-                  onSelect: (t) => setState(() => _tab = t),
-                ),
-              ),
-
-              // Permission helper overlay (optional but nice on web)
-              Positioned.fill(
-                child: IgnorePointer(
-                  ignoring: true,
-                  child: ValueListenableBuilder<MobileScannerState>(
-                    valueListenable: _controller,
-                    builder: (_, state, __) {
-                      if (state.hasCameraPermission) return const SizedBox();
-                      return Center(
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 18),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.55),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.12),
+              // Permission helper overlay (only when active)
+              if (_isActive)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    ignoring: true,
+                    child: ValueListenableBuilder<MobileScannerState>(
+                      valueListenable: _controller,
+                      builder: (_, state, __) {
+                        if (state.hasCameraPermission) return const SizedBox();
+                        return Center(
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 18),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.12),
+                              ),
+                            ),
+                            child: Text(
+                              'Camera permission needed to scan.\nCheck your browser site settings.',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    color: Colors.white.withValues(alpha: 0.92),
+                                    fontWeight: FontWeight.w800,
+                                  ),
                             ),
                           ),
-                          child: Text(
-                            'Camera permission needed to scan.\nCheck your browser site settings.',
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(
-                                  color: Colors.white.withOpacity(0.92),
-                                  fontWeight: FontWeight.w800,
-                                ),
-                          ),
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
                 ),
-              ),
             ],
           );
         },
@@ -386,7 +455,7 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
   }
 }
 
-enum _BottomTab { scan, cart, me }
+/* ----------------------------- UI PARTS ----------------------------- */
 
 class _LastScannedPill extends StatelessWidget {
   const _LastScannedPill({
@@ -401,8 +470,8 @@ class _LastScannedPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = AppColors.primary.withOpacity(0.22);
-    final fg = Colors.white.withOpacity(0.92);
+    final bg = AppColors.primary.withValues(alpha: 0.22);
+    final fg = Colors.white.withValues(alpha: 0.92);
 
     return InkWell(
       onTap: onTap,
@@ -413,23 +482,21 @@ class _LastScannedPill extends StatelessWidget {
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.white.withOpacity(0.10)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min, // <-- key
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
               width: 34,
               height: 34,
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.55),
+                color: AppColors.primary.withValues(alpha: 0.55),
                 shape: BoxShape.circle,
               ),
               child: Icon(Icons.history, color: fg, size: 18),
             ),
             const SizedBox(width: 10),
-
-            // Was Expanded(...) -> change to Flexible(loose)
             Flexible(
               fit: FlexFit.loose,
               child: Column(
@@ -440,7 +507,7 @@ class _LastScannedPill extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: fg.withOpacity(0.75),
+                      color: fg.withValues(alpha: 0.75),
                       letterSpacing: 0.8,
                     ),
                   ),
@@ -457,7 +524,6 @@ class _LastScannedPill extends StatelessWidget {
                 ],
               ),
             ),
-
             const SizedBox(width: 10),
             Container(
               width: 22,
@@ -465,13 +531,15 @@ class _LastScannedPill extends StatelessWidget {
               decoration: BoxDecoration(
                 color: enabled
                     ? const Color(0xFF19C37D)
-                    : Colors.white.withOpacity(0.18),
+                    : Colors.white.withValues(alpha: 0.18),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.check,
                 size: 14,
-                color: enabled ? Colors.white : Colors.white.withOpacity(0.50),
+                color: enabled
+                    ? Colors.white
+                    : Colors.white.withValues(alpha: 0.50),
               ),
             ),
           ],
@@ -498,19 +566,19 @@ class _AutoScanPill extends StatelessWidget {
       height: 40,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.35),
+        color: Colors.black.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withOpacity(0.10)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 18, color: Colors.white.withOpacity(0.85)),
+          Icon(icon, size: 18, color: Colors.white.withValues(alpha: 0.85)),
           const SizedBox(width: 10),
           Text(
             text,
             style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: Colors.white.withOpacity(0.85),
+              color: Colors.white.withValues(alpha: 0.85),
               letterSpacing: 0.8,
             ),
           ),
@@ -521,196 +589,60 @@ class _AutoScanPill extends StatelessWidget {
 }
 
 class _ManualEntryButton extends StatelessWidget {
-  const _ManualEntryButton({required this.onPressed});
+  const _ManualEntryButton({required this.onPressed, required this.allowBlur});
+
   final VoidCallback onPressed;
+  final bool allowBlur;
 
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
-    return Container(
-      decoration: BoxDecoration(
-        boxShadow: tokens.cardShadow,
-        borderRadius: BorderRadius.circular(tokens.radiusXl),
-      ),
-      child: FilledButton(
-        onPressed: onPressed,
-        style: FilledButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: AppColors.ink,
-          minimumSize: const Size.fromHeight(68),
-          shape: RoundedRectangleBorder(
+    final t = Theme.of(context).textTheme;
+
+    final content = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        splashColor: Colors.white.withValues(alpha: 0.10),
+        highlightColor: Colors.white.withValues(alpha: 0.06),
+        child: Container(
+          height: 68,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.45),
             borderRadius: BorderRadius.circular(tokens.radiusXl),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
           ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.keyboard_rounded, size: 22),
-            const SizedBox(width: 12),
-            Text(
-              'Enter Code Manually',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BottomNavBar extends StatelessWidget {
-  const _BottomNavBar({
-    required this.selected,
-    required this.cartCount,
-    required this.onSelect,
-  });
-
-  final _BottomTab selected;
-  final int cartCount;
-  final ValueChanged<_BottomTab> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = Theme.of(context).extension<AppTokens>()!;
-    final selectedColor = AppColors.primary;
-    final unselectedColor = Colors.white.withOpacity(0.65);
-
-    return Stack(
-      alignment: Alignment.bottomCenter,
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(tokens.radiusXl),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Container(
-              height: 78,
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.45),
-                borderRadius: BorderRadius.circular(tokens.radiusXl),
-                border: Border.all(color: Colors.white.withOpacity(0.10)),
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.keyboard_rounded,
+                size: 22,
+                color: Colors.white.withValues(alpha: 0.92),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              child: Row(
-                children: [
-                  _NavItem(
-                    label: 'Scan',
-                    icon: Icons.qr_code_scanner_rounded,
-                    selected: selected == _BottomTab.scan,
-                    selectedColor: selectedColor,
-                    unselectedColor: unselectedColor,
-                    onTap: () => onSelect(_BottomTab.scan),
-                  ),
-                  const Spacer(),
-                  const SizedBox(width: 84),
-                  const Spacer(),
-                  _NavItem(
-                    label: 'Me',
-                    icon: Icons.person_rounded,
-                    selected: selected == _BottomTab.me,
-                    selectedColor: selectedColor,
-                    unselectedColor: unselectedColor,
-                    onTap: () => onSelect(_BottomTab.me),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        Positioned(
-          bottom: 10,
-          child: GestureDetector(
-            onTap: () => onSelect(_BottomTab.cart),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  width: 66,
-                  height: 66,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    shape: BoxShape.circle,
-                    boxShadow: tokens.glowShadow,
-                  ),
-                  child: const Icon(
-                    Icons.shopping_cart_rounded,
-                    color: Colors.white,
-                    size: 28,
-                  ),
+              const SizedBox(width: 12),
+              Text(
+                'Enter Code Manually',
+                style: t.titleLarge?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.85),
+                  fontWeight: FontWeight.w800,
                 ),
-                if (cartCount > 0)
-                  Positioned(
-                    right: -2,
-                    top: -2,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 4,
-                      ),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFE5484D),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text(
-                        '$cartCount',
-                        style: Theme.of(context).textTheme.labelMedium
-                            ?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0,
-                            ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
-      ],
-    );
-  }
-}
-
-class _NavItem extends StatelessWidget {
-  const _NavItem({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.selectedColor,
-    required this.unselectedColor,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final Color selectedColor;
-  final Color unselectedColor;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = selected ? selectedColor : unselectedColor;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: SizedBox(
-        width: 72,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 26),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: Theme.of(
-                context,
-              ).textTheme.labelMedium?.copyWith(color: color, letterSpacing: 0),
-            ),
-          ],
-        ),
       ),
+    );
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(tokens.radiusXl),
+      child: allowBlur
+          ? BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 7, sigmaY: 7),
+              child: content,
+            )
+          : content,
     );
   }
 }

@@ -115,7 +115,7 @@ class AppTheme {
           titleMedium: GoogleFonts.plusJakartaSans(
             fontSize: 16,
             height: 1.2,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w800,
           ),
           bodyLarge: GoogleFonts.plusJakartaSans(
             fontSize: 16,
@@ -329,7 +329,7 @@ class AppTheme {
       // Cursor/selection (important for your big input fields)
       textSelectionTheme: TextSelectionThemeData(
         cursorColor: AppColors.ink,
-        selectionColor: AppColors.primary.withOpacity(0.18),
+        selectionColor: AppColors.primary.withValues(alpha: 0.18),
         selectionHandleColor: AppColors.primary,
       ),
     );
