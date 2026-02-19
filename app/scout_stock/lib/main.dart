@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:scout_stock/pages/activity_log_admin_page.dart';
 import 'package:scout_stock/pages/cart_page.dart';
+import 'package:scout_stock/pages/me_page.dart';
 import 'package:scout_stock/pages/scan_page.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 import 'package:scout_stock/widgets/admin_shell.dart';
@@ -26,7 +27,7 @@ class MyApp extends StatelessWidget {
               pages: const [
                 ScanPage(),
                 CartPage(),
-                _PlaceholderPage(title: "Me"),
+                MePage(isAdmin: isAdmin), 
                 _PlaceholderPage(title: "Manage"),
                 ActivityLogPage(),
                 _PlaceholderPage(title: "Users"),

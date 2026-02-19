@@ -405,7 +405,7 @@ class _ScanPageState extends State<ScanPage>
                     ignoring: true,
                     child: AnimatedBuilder(
                       animation: _blackFade,
-                      builder: (_, __) {
+                      builder: (_, _) {
                         final a = _blackFade.value.clamp(0.0, 1.0);
                         if (a <= 0.001) return const SizedBox.shrink();
                         return ColoredBox(
@@ -562,7 +562,7 @@ class _ScanPageState extends State<ScanPage>
                     ignoring: true,
                     child: ValueListenableBuilder<MobileScannerState>(
                       valueListenable: _controller,
-                      builder: (_, state, __) {
+                      builder: (_, state, _) {
                         if (state.hasCameraPermission) return const SizedBox();
                         return Center(
                           child: Container(

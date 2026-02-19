@@ -21,13 +21,15 @@ class CheckoutResultDialog extends StatelessWidget {
   factory CheckoutResultDialog.success({
     Key? key,
     required String transactionId,
+    String title = 'Checkout Complete',
+    String message = 'Items successfully checked out.',
     VoidCallback? onFinish,
   }) {
     return CheckoutResultDialog._(
       key: key,
       type: CheckoutResultType.success,
-      title: 'Checkout Complete',
-      message: 'Items successfully checked out.',
+      title: title,
+      message: message,
       transactionId: transactionId,
       primaryLabel: 'Finish',
       onPrimary: onFinish,
@@ -277,7 +279,7 @@ Future<void> showCheckoutResultDialog(
     barrierLabel: 'Checkout Result',
     barrierColor: Colors.black.withValues(alpha: 0.55),
     transitionDuration: const Duration(milliseconds: 220),
-    pageBuilder: (_, __, ___) {
+    pageBuilder: (_, _, _) {
       return SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -285,7 +287,7 @@ Future<void> showCheckoutResultDialog(
         ),
       );
     },
-    transitionBuilder: (_, anim, __, w) {
+    transitionBuilder: (_, anim, _, w) {
       final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
       return FadeTransition(
         opacity: curved,
