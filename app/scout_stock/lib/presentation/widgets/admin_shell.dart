@@ -43,17 +43,9 @@ class _AdminShellState extends State<AdminShell> {
       indexListenable: _index,
       child: Scaffold(
         extendBody: true, // lets camera show behind glass nav
-        body: MediaQuery.removePadding(
-          context: context,
-          removeTop: true,
-          removeBottom: true,
-          removeLeft: true,
-          removeRight: true,
-          child: ValueListenableBuilder<int>(
-            valueListenable: _index,
-            builder: (_, i, _) =>
-                IndexedStack(index: i, children: widget.pages),
-          ),
+        body: ValueListenableBuilder<int>(
+          valueListenable: _index,
+          builder: (_, i, _) => IndexedStack(index: i, children: widget.pages),
         ),
         bottomNavigationBar: ValueListenableBuilder<int>(
           valueListenable: _index,
