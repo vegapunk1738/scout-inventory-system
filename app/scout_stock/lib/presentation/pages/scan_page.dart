@@ -379,7 +379,7 @@ class _ScanPageState extends State<ScanPage>
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
-    final safe = EdgeInsets.zero;
+    final safe = MediaQuery.paddingOf(context);
 
     // BackdropFilter is expensive on Web. Keep look on mobile, skip blur on web.
     final allowBlur = !kIsWeb;
@@ -461,19 +461,21 @@ class _ScanPageState extends State<ScanPage>
                 const Positioned.fill(child: ColoredBox(color: Colors.black)),
           
               // Gradient overlay (cheap)
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      stops: const [0.0, 0.24, 0.62, 1.0],
-                      colors: [
-                        Colors.black.withValues(alpha: 0.40),
-                        Colors.black.withValues(alpha: 0.10),
-                        Colors.black.withValues(alpha: 0.18),
-                        Colors.black.withValues(alpha: 0.55),
-                      ],
+              SafeArea(
+                child: Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: const [0.0, 0.24, 0.62, 1.0],
+                        colors: [
+                          Colors.black.withValues(alpha: 0.40),
+                          Colors.black.withValues(alpha: 0.10),
+                          Colors.black.withValues(alpha: 0.18),
+                          Colors.black.withValues(alpha: 0.55),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -482,190 +484,190 @@ class _ScanPageState extends State<ScanPage>
               // Snapchat-like fade: black cover that fades out when feed is ready.
               // (Only when active; when inactive we already hard-hide camera.)
               if (_isActive)
-                Positioned.fill(
-                  child: IgnorePointer(
-                    ignoring: true,
-                    child: AnimatedBuilder(
-                      animation: _blackFade,
-                      builder: (_, _) {
-                        final a = _blackFade.value.clamp(0.0, 1.0);
-                        if (a <= 0.001) return const SizedBox.shrink();
-                        return ColoredBox(
-                          color: Colors.black.withValues(alpha: a),
-                        );
-                      },
+                SafeArea(
+                  child: Positioned.fill(
+                    child: IgnorePointer(
+                      ignoring: true,
+                      child: AnimatedBuilder(
+                        animation: _blackFade,
+                        builder: (_, _) {
+                          final a = _blackFade.value.clamp(0.0, 1.0);
+                          if (a <= 0.001) return const SizedBox.shrink();
+                          return ColoredBox(
+                            color: Colors.black.withValues(alpha: a),
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ),
           
               // --- UI overlays (fade in quickly after snap fade ends) ---
-              SafeArea(
-                child: AnimatedOpacity(
-                  opacity: showOverlays ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 160),
-                  curve: Curves.easeOut,
-                  child: IgnorePointer(
-                    ignoring: !showOverlays,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        // Top pill
-                        Positioned(
-                          top: topY,
-                          left: sidePad,
-                          right: sidePad,
-                          height: topRowH,
-                          child: Row(
+              AnimatedOpacity(
+                opacity: showOverlays ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOut,
+                child: IgnorePointer(
+                  ignoring: !showOverlays,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // Top pill
+                      Positioned(
+                        top: topY,
+                        left: sidePad,
+                        right: sidePad,
+                        height: topRowH,
+                        child: Row(
+                          children: [
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: math.min(320.0, w - sidePad * 2),
+                              ),
+                              child: _LastScannedPill(
+                                label: _lastBucketLabel ?? '—',
+                                enabled: _lastBucketLabel != null,
+                                onTap:
+                                    (_lastBucketLabel == null ||
+                                        _lastRaw == null)
+                                    ? null
+                                    : _openLastScannedIfDemo,
+                              ),
+                            ),
+                            const Spacer(),
+                          ],
+                        ),
+                      ),
+          
+                      // Title
+                      Positioned(
+                        top: titleY + 20,
+                        left: sidePad,
+                        right: sidePad,
+                        child: Column(
+                          children: [
+                            Text(
+                              'Align barcode within frame',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    color: Colors.white.withValues(
+                                      alpha: 0.92,
+                                    ),
+                                  ),
+                            ),
+                            const SizedBox(height: 10),
+                          ],
+                        ),
+                      ),
+          
+                      // Scan frame
+                      Positioned(
+                        top: frameY,
+                        left: (w - frameSize) / 2,
+                        width: frameSize,
+                        height: frameSize,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(20),
+                          child: Stack(
+                            fit: StackFit.expand,
                             children: [
-                              ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  maxWidth: math.min(320.0, w - sidePad * 2),
+                              if (allowBlur)
+                                BackdropFilter(
+                                  filter: ImageFilter.blur(
+                                    sigmaX: 5,
+                                    sigmaY: 5,
+                                  ),
+                                  child: Container(
+                                    color: Colors.black.withValues(
+                                      alpha: 0.08,
+                                    ),
+                                  ),
+                                )
+                              else
+                                Container(
+                                  color: Colors.black.withValues(alpha: 0.14),
                                 ),
-                                child: _LastScannedPill(
-                                  label: _lastBucketLabel ?? '—',
-                                  enabled: _lastBucketLabel != null,
-                                  onTap:
-                                      (_lastBucketLabel == null ||
-                                          _lastRaw == null)
-                                      ? null
-                                      : _openLastScannedIfDemo,
+                              CustomPaint(
+                                painter: _ScanFramePainter(
+                                  cornerColor: AppColors.primary,
+                                  borderColor: Colors.white.withValues(
+                                    alpha: 0.42,
+                                  ),
+                                ),
+                                child: const SizedBox.expand(),
+                              ),
+                              Center(
+                                child: Icon(
+                                  Icons.add,
+                                  size: 34,
+                                  color: Colors.white.withValues(alpha: 0.40),
                                 ),
                               ),
-                              const Spacer(),
                             ],
                           ),
                         ),
-                          
-                        // Title
-                        Positioned(
-                          top: titleY + 20,
-                          left: sidePad,
-                          right: sidePad,
-                          child: Column(
-                            children: [
-                              Text(
-                                'Align barcode within frame',
-                                textAlign: TextAlign.center,
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.92,
-                                      ),
-                                    ),
-                              ),
-                              const SizedBox(height: 10),
-                            ],
+                      ),
+          
+                      // Auto scan pill
+                      Positioned(
+                        top: frameY + frameSize + gapFrameToPill,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: _AutoScanPill(
+                            text: 'AUTO-SCAN ENABLED',
+                            icon: Icons.qr_code_scanner,
+                            tokens: tokens,
                           ),
                         ),
-                          
-                        // Scan frame
-                        Positioned(
-                          top: frameY,
-                          left: (w - frameSize) / 2,
-                          width: frameSize,
-                          height: frameSize,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(20),
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                if (allowBlur)
-                                  BackdropFilter(
-                                    filter: ImageFilter.blur(
-                                      sigmaX: 5,
-                                      sigmaY: 5,
-                                    ),
-                                    child: Container(
-                                      color: Colors.black.withValues(
-                                        alpha: 0.08,
-                                      ),
-                                    ),
-                                  )
-                                else
-                                  Container(
-                                    color: Colors.black.withValues(alpha: 0.14),
+                      ),
+          
+                      // Manual entry button
+                      Positioned(
+                        left: sidePad,
+                        right: sidePad,
+                        bottom: manualBottomInset,
+                        height: manualBtnH,
+                        child: _ManualEntryButton(
+                          allowBlur: allowBlur,
+                          onPressed: () async {
+                            _enqueueCamera(_deactivateScanner);
+          
+                            final code = await Navigator.of(context)
+                                .push<String>(
+                                  MaterialPageRoute(
+                                    builder: (_) => const ManualEntryPage(),
                                   ),
-                                CustomPaint(
-                                  painter: _ScanFramePainter(
-                                    cornerColor: AppColors.primary,
-                                    borderColor: Colors.white.withValues(
-                                      alpha: 0.42,
-                                    ),
-                                  ),
-                                  child: const SizedBox.expand(),
-                                ),
-                                Center(
-                                  child: Icon(
-                                    Icons.add,
-                                    size: 34,
-                                    color: Colors.white.withValues(alpha: 0.40),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                          
-                        // Auto scan pill
-                        Positioned(
-                          top: frameY + frameSize + gapFrameToPill,
-                          left: 0,
-                          right: 0,
-                          child: Center(
-                            child: _AutoScanPill(
-                              text: 'AUTO-SCAN ENABLED',
-                              icon: Icons.qr_code_scanner,
-                              tokens: tokens,
-                            ),
-                          ),
-                        ),
-                          
-                        // Manual entry button
-                        Positioned(
-                          left: sidePad,
-                          right: sidePad,
-                          bottom: manualBottomInset,
-                          height: manualBtnH,
-                          child: _ManualEntryButton(
-                            allowBlur: allowBlur,
-                            onPressed: () async {
-                              _enqueueCamera(_deactivateScanner);
-                          
-                              final code = await Navigator.of(context)
-                                  .push<String>(
-                                    MaterialPageRoute(
-                                      builder: (_) => const ManualEntryPage(),
-                                    ),
-                                  );
-                          
-                              if (!mounted) return;
-                          
-                              if (code == null || code.trim().isEmpty) {
-                                if (_isActive) {
-                                  _resetFadeState();
-                                  _enqueueCamera(_activateScanner);
-                                }
-                                return;
-                              }
-                          
-                              final now = DateTime.now();
-                              setState(() {
-                                _lastRaw = code;
-                                _lastAt = now;
-                                _lastBucketLabel = _bucketLabelFromRaw(code);
-                              });
-                          
-                              final opened = await _openBucketIfDemo(code);
-                          
-                              if (!opened && _isActive) {
+                                );
+          
+                            if (!mounted) return;
+          
+                            if (code == null || code.trim().isEmpty) {
+                              if (_isActive) {
                                 _resetFadeState();
                                 _enqueueCamera(_activateScanner);
                               }
-                            },
-                          ),
+                              return;
+                            }
+          
+                            final now = DateTime.now();
+                            setState(() {
+                              _lastRaw = code;
+                              _lastAt = now;
+                              _lastBucketLabel = _bucketLabelFromRaw(code);
+                            });
+          
+                            final opened = await _openBucketIfDemo(code);
+          
+                            if (!opened && _isActive) {
+                              _resetFadeState();
+                              _enqueueCamera(_activateScanner);
+                            }
+                          },
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
