@@ -6,6 +6,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:scout_stock/presentation/pages/bucket_single_item_page.dart';
 
 import '../../theme/app_theme.dart';
 import '../widgets/admin_shell.dart';
@@ -49,6 +50,8 @@ class _ScanPageState extends State<ScanPage>
   String? _lastBucketLabel;
 
   static final RegExp _digits = RegExp(r'(\d+)');
+
+  bool _navigating = false;
 
   @override
   void initState() {
@@ -274,6 +277,27 @@ class _ScanPageState extends State<ScanPage>
     if (label != _lastBucketLabel) {
       setState(() => _lastBucketLabel = label);
     }
+
+    // ✅ Navigate to bucket page when this code is scanned
+    if (raw == 'ABC-ABC-123' && !_navigating) {
+      _navigating = true;
+
+      // Stop camera while inside the bucket page (privacy + performance)
+      _enqueueCamera(_deactivateScanner);
+
+      Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => BucketItemPage(barcode: raw)))
+          .then((_) {
+            if (!mounted) return;
+            _navigating = false;
+
+            // Resume scanning when returning
+            if (_isActive) {
+              _resetFadeState();
+              _enqueueCamera(_activateScanner);
+            }
+          });
+    }
   }
 
   String _bucketLabelFromRaw(String raw) {
@@ -298,6 +322,58 @@ class _ScanPageState extends State<ScanPage>
     _blackFade.dispose();
 
     super.dispose();
+  }
+
+  Future<void> _openLastScannedIfDemo() async {
+    final raw = _lastRaw;
+    if (raw == null || raw.isEmpty) return;
+
+    // Only open the single-item page for the demo code
+    if (raw != 'ABC-ABC-123') return;
+
+    if (_navigating) return;
+    _navigating = true;
+
+    // Stop camera while inside the bucket page
+    _enqueueCamera(_deactivateScanner);
+
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => BucketItemPage(barcode: raw)));
+
+    if (!mounted) return;
+    _navigating = false;
+
+    // Resume scanning when returning
+    if (_isActive) {
+      _resetFadeState();
+      _enqueueCamera(_activateScanner);
+    }
+  }
+
+  Future<bool> _openBucketIfDemo(String raw) async {
+    if (raw != 'ABC-ABC-123') return false;
+    if (_navigating) return true;
+
+    _navigating = true;
+
+    // Stop camera while inside the bucket page
+    _enqueueCamera(_deactivateScanner);
+
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => BucketItemPage(barcode: raw)));
+
+    if (!mounted) return true;
+    _navigating = false;
+
+    // Resume scanning when returning
+    if (_isActive) {
+      _resetFadeState();
+      _enqueueCamera(_activateScanner);
+    }
+
+    return true;
   }
 
   @override
@@ -441,11 +517,11 @@ class _ScanPageState extends State<ScanPage>
                               child: _LastScannedPill(
                                 label: _lastBucketLabel ?? '—',
                                 enabled: _lastBucketLabel != null,
-                                onTap: _lastBucketLabel == null
+                                onTap:
+                                    (_lastBucketLabel == null ||
+                                        _lastRaw == null)
                                     ? null
-                                    : () => debugPrint(
-                                        'Open Last Scanned $_lastBucketLabel',
-                                      ),
+                                    : _openLastScannedIfDemo,
                               ),
                             ),
                             const Spacer(),
@@ -541,12 +617,39 @@ class _ScanPageState extends State<ScanPage>
                         height: manualBtnH,
                         child: _ManualEntryButton(
                           allowBlur: allowBlur,
-                          onPressed: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => const ManualEntryPage(),
-                              ),
-                            );
+                          onPressed: () async {
+                            _enqueueCamera(_deactivateScanner);
+
+                            final code = await Navigator.of(context)
+                                .push<String>(
+                                  MaterialPageRoute(
+                                    builder: (_) => const ManualEntryPage(),
+                                  ),
+                                );
+
+                            if (!mounted) return;
+
+                            if (code == null || code.trim().isEmpty) {
+                              if (_isActive) {
+                                _resetFadeState();
+                                _enqueueCamera(_activateScanner);
+                              }
+                              return;
+                            }
+
+                            final now = DateTime.now();
+                            setState(() {
+                              _lastRaw = code;
+                              _lastAt = now;
+                              _lastBucketLabel = _bucketLabelFromRaw(code);
+                            });
+
+                            final opened = await _openBucketIfDemo(code);
+
+                            if (!opened && _isActive) {
+                              _resetFadeState();
+                              _enqueueCamera(_activateScanner);
+                            }
                           },
                         ),
                       ),
@@ -671,23 +774,6 @@ class _LastScannedPill extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 10),
-            Container(
-              width: 22,
-              height: 22,
-              decoration: BoxDecoration(
-                color: enabled
-                    ? const Color(0xFF19C37D)
-                    : Colors.white.withValues(alpha: 0.18),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.check,
-                size: 14,
-                color: enabled
-                    ? Colors.white
-                    : Colors.white.withValues(alpha: 0.50),
-              ),
-            ),
           ],
         ),
       ),

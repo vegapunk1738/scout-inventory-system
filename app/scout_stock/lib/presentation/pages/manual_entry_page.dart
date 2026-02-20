@@ -50,17 +50,18 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
     if (code.isEmpty) {
       _focusNode.requestFocus();
       await _fieldKey.currentState?.triggerInvalid();
-      if (!mounted) return;
+      return;
     }
 
     if (!_mockBucketExists(code)) {
       _focusNode.requestFocus();
       await _fieldKey.currentState?.triggerInvalid();
-      if (!mounted) return;
+      return;
     }
 
     FocusScope.of(context).unfocus();
-    debugPrint('Entered Bucket Code : $code');
+
+    Navigator.of(context).pop<String>(code);
   }
 
   @override
@@ -124,26 +125,6 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
         onPressed: _openBucket,
         respectKeyboardInset: true, // keeps the nice lift when keyboard opens
       ),
-    );
-  }
-}
-
-class _Glow extends StatelessWidget {
-  const _Glow({
-    required this.child,
-    required this.borderRadius,
-    required this.shadows,
-  });
-
-  final Widget child;
-  final BorderRadius borderRadius;
-  final List<BoxShadow> shadows;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(borderRadius: borderRadius, boxShadow: shadows),
-      child: child,
     );
   }
 }

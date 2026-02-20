@@ -165,8 +165,9 @@ class MeNotifier extends Notifier<MeState> {
 
   Future<({bool ok, String? txnId, String? error})> submitReturn() async {
     if (state.submitting) return (ok: false, txnId: null, error: 'busy');
-    if (state.totalToReturn == 0)
+    if (state.totalToReturn == 0) {
       return (ok: false, txnId: null, error: 'empty');
+    }
 
     state = state.copyWith(submitting: true);
     try {
