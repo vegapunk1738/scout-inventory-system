@@ -1,7 +1,6 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:scout_stock/theme/app_theme.dart';
-import 'package:scout_stock/widgets/glowing_action_button.dart';
+import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
 
 enum CheckoutResultType { success, failure }
 

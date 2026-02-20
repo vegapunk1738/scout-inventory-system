@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:scout_stock/widgets/glowing_action_button.dart';
+import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
 
-import '../theme/app_theme.dart';
+import '../../theme/app_theme.dart';
 import '../widgets/attention_text_field_widget.dart';
 
 class ManualEntryPage extends StatefulWidget {

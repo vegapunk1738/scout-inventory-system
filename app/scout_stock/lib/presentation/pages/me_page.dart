@@ -1,239 +1,84 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+import 'package:scout_stock/state/notifiers/me_notifier.dart';
+import 'package:scout_stock/state/providers/me_provider.dart';
+import 'package:scout_stock/state/providers/current_user_provider.dart';
+
 import 'package:scout_stock/theme/app_theme.dart';
-import 'package:scout_stock/widgets/checkout_result_dialog.dart';
-import 'package:scout_stock/widgets/glowing_action_button.dart';
+import 'package:scout_stock/presentation/widgets/checkout_result_dialog.dart';
+import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
 
-enum MeFilterMode { all, borrowedOnly, returnedOnly }
-
-class MePage extends StatefulWidget {
-  const MePage({
-    super.key,
-    required this.isAdmin,
-    this.displayName = "Alex Smith",
-  });
-
-  final bool isAdmin;
-  final String displayName;
+class MePage extends ConsumerWidget {
+  const MePage({super.key});
 
   @override
-  State<MePage> createState() => _MePageState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final me = ref.watch(meProvider);
+    final notifier = ref.read(meProvider.notifier);
 
-class _MePageState extends State<MePage> {
-  MeFilterMode _mode = MeFilterMode.all;
-  bool _submitting = false;
+    final userAsync = ref.watch(currentUserProvider);
 
-  late List<_BorrowedLine> _borrowed;
-  late List<_ReturnedLine> _returned;
+    final tokens = Theme.of(context).extension<AppTokens>()!;
+    final top = MediaQuery.of(context).padding.top;
+    final compact = MediaQuery.sizeOf(context).width < 380;
 
-  final ValueNotifier<int> _totalToReturnVN = ValueNotifier<int>(0);
+    final shadow = tokens.cardShadow.isNotEmpty
+        ? [
+            tokens.cardShadow.first.copyWith(
+              blurRadius: 14,
+              offset: const Offset(0, 8),
+            ),
+          ]
+        : const <BoxShadow>[];
 
-  List<_MeRow>? _rowsCache;
-  MeFilterMode? _rowsCacheMode;
-  int _borrowedVersion = 0;
-  int _returnedVersion = 0;
-  int _rowsCacheBorrowedVersion = -1;
-  int _rowsCacheReturnedVersion = -1;
-
-  @override
-  void initState() {
-    super.initState();
-    final now = DateTime.now();
-
-    DateTime d(int daysAgo) {
-      final base = DateTime(
-        now.year,
-        now.month,
-        now.day,
-      ).subtract(Duration(days: daysAgo));
-      return base;
-    }
-
-    _borrowed = <_BorrowedLine>[
-      _BorrowedLine(
-        id: "b1",
-        checkedOutAt: d(0),
-        itemName: "Ultralight Tent",
-        bucketName: "Tents",
-        bucketId: "BKT-TENTS",
-        emoji: "🏕️",
-        emojiBg: const Color(0xFFEAF2FF),
-        outQty: 1,
-        initialToReturn: 0,
-      ),
-      _BorrowedLine(
-        id: "b2",
-        checkedOutAt: d(0),
-        itemName: "Alloy Tent Pegs",
-        bucketName: "Stakes",
-        bucketId: "BKT-STAKES",
-        emoji: "📌",
-        emojiBg: const Color(0xFFFFF4E5),
-        outQty: 10,
-        initialToReturn: 0,
-      ),
-      _BorrowedLine(
-        id: "b3",
-        checkedOutAt: d(1),
-        itemName: "Cast Iron Skillet",
-        bucketName: "Cooking",
-        bucketId: "BKT-COOK",
-        emoji: "🍳",
-        emojiBg: const Color(0xFFEFFAF3),
-        outQty: 1,
-        initialToReturn: 0,
-      ),
-    ];
-
-    _returned = <_ReturnedLine>[
-      _ReturnedLine(
-        id: "r1",
-        returnedAt: d(6),
-        itemName: "Osprey Pack 65L",
-        bucketName: "Packs",
-        bucketId: "BKT-PACKS",
-        emoji: "🎒",
-        emojiBg: const Color(0xFFEAF2FF),
-        qty: 1,
-      ),
-    ];
-
-    _recalcTotalToReturn();
-  }
-
-  @override
-  void dispose() {
-    for (final b in _borrowed) {
-      b.dispose();
-    }
-    _totalToReturnVN.dispose();
-    super.dispose();
-  }
-
-  Future<({bool ok, String? txnId, String? error})> _returnRequest() async {
-    await Future.delayed(const Duration(milliseconds: 650));
-    final ok = Random().nextBool();
-    if (ok) {
-      return (
-        ok: true,
-        txnId: "#RTN-${Random().nextInt(90000) + 10000}",
-        error: null,
-      );
-    }
-    return (ok: false, txnId: null, error: "E-RTN-500");
-  }
-
-  void _toggleMode(MeFilterMode tapped) {
-    setState(() {
-      _mode = (_mode == tapped) ? MeFilterMode.all : tapped;
-      _invalidateRowsCache();
-    });
-  }
-
-  void _setToReturn(_BorrowedLine line, int next) {
-    final clamped = next.clamp(0, line.outQty);
-    if (clamped == line.toReturn.value) return;
-
-    final prev = line.toReturn.value;
-    line.toReturn.value = clamped;
-
-    final delta = clamped - prev;
-    _totalToReturnVN.value = (_totalToReturnVN.value + delta).clamp(0, 1 << 30);
-  }
-
-  void _recalcTotalToReturn() {
-    int sum = 0;
-    for (final b in _borrowed) {
-      sum += b.toReturn.value;
-    }
-    _totalToReturnVN.value = sum;
-  }
-
-  void _invalidateRowsCache() {
-    _rowsCache = null;
-    _rowsCacheMode = null;
-  }
-
-  List<_MeRow> _getRows() {
-    final cacheOk =
-        _rowsCache != null &&
-        _rowsCacheMode == _mode &&
-        _rowsCacheBorrowedVersion == _borrowedVersion &&
-        _rowsCacheReturnedVersion == _returnedVersion;
-
-    if (cacheOk) return _rowsCache!;
-
-    final rows = _buildRows(
-      mode: _mode,
-      borrowed: _borrowed,
-      returned: _returned,
+    // User-derived header info (global user)
+    final displayName = userAsync.maybeWhen(
+      data: (u) => u.name,
+      orElse: () => 'Loading…',
     );
 
-    _rowsCache = rows;
-    _rowsCacheMode = _mode;
-    _rowsCacheBorrowedVersion = _borrowedVersion;
-    _rowsCacheReturnedVersion = _returnedVersion;
+    final role = userAsync.maybeWhen(
+      data: (u) => u.role.isAdmin ? 'Admin' : 'Scout',
+      orElse: () => '',
+    );
 
-    return rows;
-  }
+    final initials = _initials(displayName);
 
-  Future<void> _onReturn() async {
-    if (_submitting || _totalToReturnVN.value == 0) return;
+    // Build rows (headers + borrowed + returned)
+    final rows = _buildRows(
+      mode: me.mode,
+      borrowed: me.borrowed,
+      returned: me.returned,
+    );
 
-    setState(() => _submitting = true);
-    try {
-      final res = await _returnRequest();
-      if (!mounted) return;
+    final rowsEmptyForMode = rows.isEmpty;
+
+    String emptyTitle = "Nothing here yet";
+    String emptySubtitle =
+        "Checked out and returned items will show up on this page.";
+
+    if (!me.hasAny) {
+      emptyTitle = "Nothing here yet";
+      emptySubtitle =
+          "Checked out and returned items will show up on this page.";
+    } else if (me.mode == MeFilterMode.borrowedOnly && me.borrowed.isEmpty) {
+      emptyTitle = "No borrowed items";
+      emptySubtitle = "When you check out gear, it will appear here.";
+    } else if (me.mode == MeFilterMode.returnedOnly && me.returned.isEmpty) {
+      emptyTitle = "No returns yet";
+      emptySubtitle =
+          "Returned items will show up here once you bring them back.";
+    }
+
+    Future<void> onReturn() async {
+      if (me.submitting || me.totalToReturn == 0) return;
+
+      final res = await notifier.submitReturn();
+      if (!context.mounted) return;
 
       if (res.ok) {
-        final now = DateTime.now();
-
-        final newReturned = <_ReturnedLine>[];
-        final updatedBorrowed = <_BorrowedLine>[];
-
-        for (final b in _borrowed) {
-          final selected = b.toReturn.value;
-
-          if (selected <= 0) {
-            updatedBorrowed.add(b);
-            continue;
-          }
-
-          newReturned.add(
-            _ReturnedLine(
-              id: "r_${now.microsecondsSinceEpoch}_${b.id}",
-              returnedAt: now,
-              itemName: b.itemName,
-              bucketName: b.bucketName,
-              bucketId: b.bucketId,
-              emoji: b.emoji,
-              emojiBg: b.emojiBg,
-              qty: selected,
-            ),
-          );
-
-          final remaining = b.outQty - selected;
-
-          if (remaining > 0) {
-            b.toReturn.value = 0;
-            updatedBorrowed.add(b.copyWith(outQty: remaining));
-          } else {
-            b.dispose();
-          }
-        }
-
-        setState(() {
-          _borrowed = updatedBorrowed;
-          _returned = [...newReturned, ..._returned];
-
-          _borrowedVersion++;
-          _returnedVersion++;
-          _invalidateRowsCache();
-        });
-
-        _recalcTotalToReturn();
-
         await showCheckoutResultDialog(
           context,
           child: CheckoutResultDialog.success(
@@ -254,51 +99,14 @@ class _MePageState extends State<MePage> {
           barrierDismissible: true,
         );
       }
-    } finally {
-      if (mounted) setState(() => _submitting = false);
     }
-  }
 
-  @override
-  Widget build(BuildContext context) {
-    final tokens = Theme.of(context).extension<AppTokens>()!;
-    final top = MediaQuery.of(context).padding.top;
+    final showBottomReturn =
+        (me.mode != MeFilterMode.returnedOnly) &&
+        me.totalToReturn > 0 &&
+        me.borrowed.isNotEmpty;
 
-    final compact = MediaQuery.sizeOf(context).width < 380;
-
-    final shadow = tokens.cardShadow.isNotEmpty
-        ? [
-            tokens.cardShadow.first.copyWith(
-              blurRadius: 14,
-              offset: const Offset(0, 8),
-            ),
-          ]
-        : const <BoxShadow>[];
-
-    final role = widget.isAdmin ? "Admin" : "Scout";
-    final initials = _initials(widget.displayName);
-
-    final rows = _getRows();
-
-    final hasAny = _borrowed.isNotEmpty || _returned.isNotEmpty;
-    final rowsEmptyForMode = rows.isEmpty;
-
-    String emptyTitle = "Nothing here yet";
-    String emptySubtitle =
-        "Checked out and returned items will show up on this page.";
-
-    if (!hasAny) {
-      emptyTitle = "Nothing here yet";
-      emptySubtitle =
-          "Checked out and returned items will show up on this page.";
-    } else if (_mode == MeFilterMode.borrowedOnly && _borrowed.isEmpty) {
-      emptyTitle = "No borrowed items";
-      emptySubtitle = "When you check out gear, it will appear here.";
-    } else if (_mode == MeFilterMode.returnedOnly && _returned.isEmpty) {
-      emptyTitle = "No returns yet";
-      emptySubtitle =
-          "Returned items will show up here once you bring them back.";
-    }
+    final emojiBase = GoogleFonts.notoColorEmoji(height: 1);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -312,7 +120,7 @@ class _MePageState extends State<MePage> {
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(20, top + 12, 20, 14),
                     child: _MeHeader(
-                      name: widget.displayName,
+                      name: displayName,
                       role: role,
                       initials: initials,
                       onSettings: () {
@@ -327,15 +135,14 @@ class _MePageState extends State<MePage> {
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
                     child: _BorrowReturnPills(
-                      mode: _mode,
+                      mode: me.mode,
                       onTapBorrowed: () =>
-                          _toggleMode(MeFilterMode.borrowedOnly),
+                          notifier.toggleMode(MeFilterMode.borrowedOnly),
                       onTapReturned: () =>
-                          _toggleMode(MeFilterMode.returnedOnly),
+                          notifier.toggleMode(MeFilterMode.returnedOnly),
                     ),
                   ),
                 ),
-
                 if (rowsEmptyForMode)
                   SliverFillRemaining(
                     hasScrollBody: false,
@@ -344,7 +151,7 @@ class _MePageState extends State<MePage> {
                       subtitle: emptySubtitle,
                     ),
                   )
-                else ...[
+                else
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                     sliver: SliverList(
@@ -368,20 +175,22 @@ class _MePageState extends State<MePage> {
                             padding: const EdgeInsets.only(bottom: 12),
                             child: RepaintBoundary(
                               child: _BorrowedCard(
-                                line: line,
+                                record: line,
                                 tokens: tokens,
                                 compact: compact,
                                 shadow: shadow,
-                                onChanged: (next) => _setToReturn(line, next),
+                                emojiBase: emojiBase,
+                                onChanged: (next) =>
+                                    notifier.setToReturn(line.id, next),
                               ),
                             ),
                           );
                         }
 
-                        final crossline = _mode == MeFilterMode.returnedOnly;
+                        final crossline = me.mode == MeFilterMode.returnedOnly;
                         final faded =
-                            (_mode == MeFilterMode.all) ||
-                            (_mode == MeFilterMode.returnedOnly);
+                            (me.mode == MeFilterMode.all) ||
+                            (me.mode == MeFilterMode.returnedOnly);
 
                         final line = r.returned!;
                         return Padding(
@@ -389,10 +198,11 @@ class _MePageState extends State<MePage> {
                           padding: const EdgeInsets.only(bottom: 12),
                           child: RepaintBoundary(
                             child: _ReturnedCard(
-                              line: line,
+                              record: line,
                               tokens: tokens,
                               compact: compact,
                               shadow: shadow,
+                              emojiBase: emojiBase,
                               faded: faded,
                               crossline: crossline,
                             ),
@@ -401,49 +211,25 @@ class _MePageState extends State<MePage> {
                       }, childCount: rows.length),
                     ),
                   ),
-
-                  SliverToBoxAdapter(
-                    child: ValueListenableBuilder<int>(
-                      valueListenable: _totalToReturnVN,
-                      builder: (context, total, _) {
-                        final showBottomReturn =
-                            (_mode != MeFilterMode.returnedOnly) &&
-                            total > 0 &&
-                            _borrowed.isNotEmpty;
-
-                        return SizedBox(height: showBottomReturn ? 120 : 22);
-                      },
-                    ),
-                  ),
-                ],
+                SliverToBoxAdapter(
+                  child: SizedBox(height: showBottomReturn ? 120 : 22),
+                ),
               ],
             ),
-
-            ValueListenableBuilder<int>(
-              valueListenable: _totalToReturnVN,
-              builder: (context, total, _) {
-                final showBottomReturn =
-                    (_mode != MeFilterMode.returnedOnly) &&
-                    total > 0 &&
-                    _borrowed.isNotEmpty;
-
-                if (!showBottomReturn) return const SizedBox.shrink();
-
-                return Align(
-                  alignment: Alignment.bottomCenter,
-                  child: GlowingActionButton(
-                    label: total == 1
-                        ? "Return Items (1)"
-                        : "Return Items ($total)",
-                    icon: const Icon(Icons.keyboard_return_rounded),
-                    loading: _submitting,
-                    onPressed: _submitting ? null : _onReturn,
-                    padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
-                    height: 74,
-                  ),
-                );
-              },
-            ),
+            if (showBottomReturn)
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: GlowingActionButton(
+                  label: me.totalToReturn == 1
+                      ? "Return Items (1)"
+                      : "Return Items (${me.totalToReturn})",
+                  icon: const Icon(Icons.keyboard_return_rounded),
+                  loading: me.submitting,
+                  onPressed: me.submitting ? null : onReturn,
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
+                  height: 74,
+                ),
+              ),
           ],
         ),
       ),
@@ -654,15 +440,15 @@ class _MeRow {
 
   final _MeRowKind kind;
   final String? header;
-  final _BorrowedLine? borrowed;
-  final _ReturnedLine? returned;
+  final BorrowedRecord? borrowed;
+  final ReturnedRecord? returned;
   final double topGap;
 }
 
 List<_MeRow> _buildRows({
   required MeFilterMode mode,
-  required List<_BorrowedLine> borrowed,
-  required List<_ReturnedLine> returned,
+  required List<BorrowedRecord> borrowed,
+  required List<ReturnedRecord> returned,
 }) {
   final includeBorrowed = mode != MeFilterMode.returnedOnly;
   final includeReturned = mode != MeFilterMode.borrowedOnly;
@@ -701,10 +487,10 @@ List<_MeRow> _buildRows({
         .toList();
 
     borrowedRows.sort(
-      (a, b) => a.borrowed!.itemName.compareTo(b.borrowed!.itemName),
+      (a, b) => a.borrowed!.item.name.compareTo(b.borrowed!.item.name),
     );
     returnedRows.sort(
-      (a, b) => a.returned!.itemName.compareTo(b.returned!.itemName),
+      (a, b) => a.returned!.item.name.compareTo(b.returned!.item.name),
     );
 
     rows.addAll(borrowedRows);
@@ -749,21 +535,23 @@ class _DateHeader extends StatelessWidget {
   }
 }
 
-/* ----------------------------- Borrowed Card (Cart style + big stepper) ----------------------------- */
+/* ----------------------------- Borrowed Card ----------------------------- */
 
 class _BorrowedCard extends StatelessWidget {
   const _BorrowedCard({
-    required this.line,
+    required this.record,
     required this.tokens,
     required this.compact,
     required this.shadow,
+    required this.emojiBase,
     required this.onChanged,
   });
 
-  final _BorrowedLine line;
+  final BorrowedRecord record;
   final AppTokens tokens;
   final bool compact;
   final List<BoxShadow> shadow;
+  final TextStyle emojiBase;
   final ValueChanged<int> onChanged;
 
   @override
@@ -772,6 +560,9 @@ class _BorrowedCard extends StatelessWidget {
 
     final tile = compact ? 48.0 : 54.0;
     final emojiSize = compact ? 24.0 : 28.0;
+
+    final item = record.item;
+    final bg = _emojiBgFor(item.id);
 
     return Container(
       decoration: BoxDecoration(
@@ -789,17 +580,13 @@ class _BorrowedCard extends StatelessWidget {
                 width: tile,
                 height: tile,
                 decoration: BoxDecoration(
-                  color: line.emojiBg,
+                  color: bg,
                   borderRadius: BorderRadius.circular(tokens.radiusLg),
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  line.emoji,
-                  style: TextStyle(
-                    fontSize: emojiSize,
-                    height: 1,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  item.emoji,
+                  style: emojiBase.copyWith(fontSize: emojiSize),
                 ),
               ),
               const SizedBox(width: 12),
@@ -810,7 +597,7 @@ class _BorrowedCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        line.itemName,
+                        item.name,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: t.titleMedium?.copyWith(
@@ -819,7 +606,7 @@ class _BorrowedCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Bucket: ${line.bucketName} • ${line.bucketId}',
+                        'Bucket: ${item.bucketName} • ${item.bucketId}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: t.bodyMedium?.copyWith(
@@ -835,18 +622,12 @@ class _BorrowedCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-
-          ValueListenableBuilder<int>(
-            valueListenable: line.toReturn,
-            builder: (context, value, _) {
-              return _ReturnQtyStepperBig(
-                value: value,
-                max: line.outQty,
-                compact: compact,
-                onMinus: () => onChanged(value - 1),
-                onPlus: () => onChanged(value + 1),
-              );
-            },
+          _ReturnQtyStepperBig(
+            value: item.quantity,
+            max: item.maxQuantity,
+            compact: compact,
+            onMinus: () => onChanged(item.quantity - 1),
+            onPlus: () => onChanged(item.quantity + 1),
           ),
         ],
       ),
@@ -980,22 +761,24 @@ class _StepIconButton extends StatelessWidget {
   }
 }
 
-/* ----------------------------- Returned Card (Cart style) ----------------------------- */
+/* ----------------------------- Returned Card ----------------------------- */
 
 class _ReturnedCard extends StatelessWidget {
   const _ReturnedCard({
-    required this.line,
+    required this.record,
     required this.tokens,
     required this.compact,
     required this.shadow,
+    required this.emojiBase,
     required this.faded,
     required this.crossline,
   });
 
-  final _ReturnedLine line;
+  final ReturnedRecord record;
   final AppTokens tokens;
   final bool compact;
   final List<BoxShadow> shadow;
+  final TextStyle emojiBase;
   final bool faded;
   final bool crossline;
 
@@ -1005,6 +788,9 @@ class _ReturnedCard extends StatelessWidget {
 
     final tile = compact ? 48.0 : 54.0;
     final emojiSize = compact ? 24.0 : 28.0;
+
+    final item = record.item;
+    final bg = _emojiBgFor(item.id);
 
     final base = Container(
       decoration: BoxDecoration(
@@ -1020,17 +806,13 @@ class _ReturnedCard extends StatelessWidget {
             width: tile,
             height: tile,
             decoration: BoxDecoration(
-              color: line.emojiBg,
+              color: bg,
               borderRadius: BorderRadius.circular(tokens.radiusLg),
             ),
             alignment: Alignment.center,
             child: Text(
-              line.emoji,
-              style: TextStyle(
-                fontSize: emojiSize,
-                height: 1,
-                fontWeight: FontWeight.w700,
-              ),
+              item.emoji,
+              style: emojiBase.copyWith(fontSize: emojiSize),
             ),
           ),
           const SizedBox(width: 12),
@@ -1041,7 +823,7 @@ class _ReturnedCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    line.itemName,
+                    item.name,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: t.titleMedium?.copyWith(
@@ -1054,7 +836,7 @@ class _ReturnedCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Bucket: ${line.bucketName} • ${line.bucketId}',
+                    'Bucket: ${item.bucketName} • ${item.bucketId}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: t.bodyMedium?.copyWith(
@@ -1080,7 +862,7 @@ class _ReturnedCard extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                "${line.qty} / ${line.qty}",
+                "${item.quantity} / ${item.maxQuantity}",
                 style: t.bodySmall?.copyWith(
                   color: AppColors.muted,
                   fontWeight: FontWeight.w800,
@@ -1145,73 +927,18 @@ class _EmptyMeState extends StatelessWidget {
   }
 }
 
-/* ----------------------------- Models + Helpers ----------------------------- */
+/* ----------------------------- Helpers ----------------------------- */
 
-class _BorrowedLine {
-  _BorrowedLine({
-    required this.id,
-    required this.checkedOutAt,
-    required this.itemName,
-    required this.bucketName,
-    required this.bucketId,
-    required this.emoji,
-    required this.emojiBg,
-    required this.outQty,
-    required int initialToReturn,
-  }) : toReturn = ValueNotifier<int>(initialToReturn);
-
-  final String id;
-  final DateTime checkedOutAt;
-
-  final String itemName;
-  final String bucketName;
-  final String bucketId;
-
-  final String emoji;
-  final Color emojiBg;
-
-  final int outQty;
-
-  final ValueNotifier<int> toReturn;
-
-  void dispose() => toReturn.dispose();
-
-  _BorrowedLine copyWith({int? outQty}) => _BorrowedLine(
-    id: id,
-    checkedOutAt: checkedOutAt,
-    itemName: itemName,
-    bucketName: bucketName,
-    bucketId: bucketId,
-    emoji: emoji,
-    emojiBg: emojiBg,
-    outQty: outQty ?? this.outQty,
-    initialToReturn: toReturn.value,
-  );
-}
-
-class _ReturnedLine {
-  const _ReturnedLine({
-    required this.id,
-    required this.returnedAt,
-    required this.itemName,
-    required this.bucketName,
-    required this.bucketId,
-    required this.emoji,
-    required this.emojiBg,
-    required this.qty,
-  });
-
-  final String id;
-  final DateTime returnedAt;
-
-  final String itemName;
-  final String bucketName;
-  final String bucketId;
-
-  final String emoji;
-  final Color emojiBg;
-
-  final int qty;
+Color _emojiBgFor(String seed) {
+  const palette = <Color>[
+    Color(0xFFEAF2FF),
+    Color(0xFFFFF4E5),
+    Color(0xFFEFFAF3),
+    Color(0xFFFFE8EE),
+    Color(0xFFEDE7FF),
+  ];
+  final hash = seed.codeUnits.fold<int>(0, (a, b) => a + b);
+  return palette[hash % palette.length];
 }
 
 String _initials(String name) {

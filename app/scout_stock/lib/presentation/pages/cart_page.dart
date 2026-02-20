@@ -1,19 +1,24 @@
-import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:scout_stock/theme/app_theme.dart';
-import 'package:scout_stock/widgets/admin_shell.dart';
 import 'dart:math';
-import 'package:scout_stock/widgets/checkout_result_dialog.dart';
-import 'package:scout_stock/widgets/glowing_action_button.dart';
 
-class CartPage extends StatefulWidget {
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+import 'package:scout_stock/domain/models/item.dart';
+import 'package:scout_stock/presentation/widgets/admin_shell.dart';
+import 'package:scout_stock/presentation/widgets/checkout_result_dialog.dart';
+import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
+import 'package:scout_stock/state/providers/cart_provider.dart';
+import 'package:scout_stock/theme/app_theme.dart';
+
+class CartPage extends ConsumerStatefulWidget {
   const CartPage({super.key});
 
   @override
-  State<CartPage> createState() => _CartPageState();
+  ConsumerState<CartPage> createState() => _CartPageState();
 }
 
-class _CartPageState extends State<CartPage> {
+class _CartPageState extends ConsumerState<CartPage> {
   bool _submitting = false;
 
   Future<({bool ok, String? txnId, String? error})> _checkoutRequest() async {
@@ -25,62 +30,16 @@ class _CartPageState extends State<CartPage> {
     return (ok: false, txnId: null, error: 'E-CHK-500');
   }
 
-  final List<_CartLine> _lines = [
-    _CartLine(
-      itemName: 'Coleman 4-Person Tent',
-      bucketName: 'Tents Bucket',
-      qty: 1,
-      maxQty: 4,
-      emoji: '🏕️',
-      emojiBg: AppColors.successBg,
-    ),
-    _CartLine(
-      itemName: 'Heavy Duty Stakes',
-      bucketName: 'Stakes Bucket',
-      qty: 4,
-      maxQty: 8,
-      emoji: '📌',
-      emojiBg: AppColors.warningBg,
-    ),
-    _CartLine(
-      itemName: 'Propane Stove (2 Burner)',
-      bucketName: 'Stoves Bucket',
-      qty: 1,
-      maxQty: 4,
-      emoji: '🔥',
-      emojiBg: AppColors.infoBg,
-    ),
-    _CartLine(
-      itemName: 'Mess Kit (Full Set)',
-      bucketName: 'Mess Kits Bucket',
-      qty: 4,
-      maxQty: 4,
-      emoji: '🍲',
-      emojiBg: const Color(0xFFFFE8EE),
-    ),
-  ];
-
-  int get _totalItems => _lines.fold<int>(0, (sum, l) => sum + l.qty);
-
-  void _inc(int index) => setState(() {
-    final line = _lines[index];
-    final next = (line.qty + 1).clamp(1, line.maxQty);
-    _lines[index] = line.copyWith(qty: next);
-  });
-
-  void _dec(int index) => setState(() {
-    final line = _lines[index];
-    final next = (line.qty - 1).clamp(1, line.maxQty);
-    _lines[index] = line.copyWith(qty: next);
-  });
-
-  void _remove(int index) => setState(() => _lines.removeAt(index));
-
   @override
   Widget build(BuildContext context) {
+    final cart = ref.watch(cartProvider);
+    final items = cart.items;
+
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
-    final isEmpty = _lines.isEmpty;
+    final isEmpty = items.isEmpty;
+
+    final totalItems = items.fold<int>(0, (sum, item) => sum + item.quantity);
 
     final w = MediaQuery.sizeOf(context).width;
     final compact = w < 380;
@@ -90,8 +49,23 @@ class _CartPageState extends State<CartPage> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: Text('Review Cart', style: t.titleLarge),
+        title: Padding(
+          padding: const EdgeInsets.only(left: 10.0),
+          child: Text('Review Cart', style: t.titleLarge),
+        ),
         centerTitle: false,
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 30.0),
+            child: IconButton(
+              tooltip: cart.undoCount > 0 ? 'Undo (${cart.undoCount})' : 'Undo',
+              onPressed: cart.canUndo
+                  ? () => ref.read(cartProvider.notifier).undoRemove()
+                  : null,
+              icon: const Icon(Icons.undo_rounded),
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -104,30 +78,33 @@ class _CartPageState extends State<CartPage> {
                   )
                 : ListView.separated(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                    itemCount: _lines.length,
+                    itemCount: items.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 14),
                     addAutomaticKeepAlives: false,
                     addRepaintBoundaries: false,
                     itemBuilder: (context, i) {
-                      final line = _lines[i];
+                      final item = items[i];
                       return _CartItemCard(
-                        line: line,
+                        item: item,
                         compact: compact,
                         tokens: tokens,
                         textTheme: t,
                         emojiBase: emojiBase,
-                        onMinus: () => _dec(i),
-                        onPlus: () => _inc(i),
-                        onRemove: () => _remove(i),
+                        onMinus: () =>
+                            ref.read(cartProvider.notifier).decrement(item.id),
+                        onPlus: () =>
+                            ref.read(cartProvider.notifier).increment(item.id),
+                        onRemove: () =>
+                            ref.read(cartProvider.notifier).remove(item.id),
                       );
                     },
                   ),
           ),
           GlowingActionButton(
-            label: 'Confirm Checkout ($_totalItems)',
+            label: 'Confirm Checkout ($totalItems)',
             icon: const Icon(Icons.check_rounded),
             loading: _submitting,
-            onPressed: _lines.isEmpty
+            onPressed: isEmpty
                 ? null
                 : () async {
                     setState(() => _submitting = true);
@@ -141,7 +118,8 @@ class _CartPageState extends State<CartPage> {
                           child: CheckoutResultDialog.success(
                             transactionId: res.txnId!,
                             onFinish: () {
-                              setState(() => _lines.clear());
+                              ref.read(cartProvider.notifier).clear();
+
                               final idx = AdminShellScope.maybeOf(context);
                               if (idx != null) idx.value = 0;
                             },
@@ -152,9 +130,7 @@ class _CartPageState extends State<CartPage> {
                           context,
                           child: CheckoutResultDialog.failure(
                             errorCode: res.error,
-                            onRetry: () {
-                              // easiest: just close dialog and user taps Confirm again
-                            },
+                            onRetry: () {},
                             onClose: () {},
                           ),
                           barrierDismissible: true,
@@ -171,11 +147,11 @@ class _CartPageState extends State<CartPage> {
   }
 }
 
-/* ----------------------------- Card Row (Better UX) ----------------------------- */
+/* ----------------------------- Card Row ----------------------------- */
 
 class _CartItemCard extends StatelessWidget {
   const _CartItemCard({
-    required this.line,
+    required this.item,
     required this.compact,
     required this.tokens,
     required this.textTheme,
@@ -185,7 +161,7 @@ class _CartItemCard extends StatelessWidget {
     required this.onRemove,
   });
 
-  final _CartLine line;
+  final Item item;
   final bool compact;
   final AppTokens tokens;
   final TextTheme textTheme;
@@ -225,12 +201,13 @@ class _CartItemCard extends StatelessWidget {
                 width: tile,
                 height: tile,
                 decoration: BoxDecoration(
-                  color: line.emojiBg,
+                  color: AppColors.background,
                   borderRadius: BorderRadius.circular(tokens.radiusLg),
+                  border: Border.all(color: AppColors.outline),
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  line.emoji,
+                  item.emoji,
                   style: emojiBase.copyWith(fontSize: emojiSize),
                 ),
               ),
@@ -242,7 +219,7 @@ class _CartItemCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        line.itemName,
+                        item.name,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: textTheme.titleMedium?.copyWith(
@@ -251,7 +228,7 @@ class _CartItemCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Bucket: ${line.bucketName}',
+                        '${item.bucketName} | ${item.bucketId}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: textTheme.bodyMedium?.copyWith(
@@ -270,8 +247,8 @@ class _CartItemCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           _QtyStepperBig(
-            value: line.qty,
-            max: line.maxQty,
+            value: item.quantity,
+            max: item.maxQuantity,
             compact: compact,
             onMinus: onMinus,
             onPlus: onPlus,
@@ -282,7 +259,7 @@ class _CartItemCard extends StatelessWidget {
   }
 }
 
-/* ----------------------------- Big Stepper (No tiny numbers) ----------------------------- */
+/* ----------------------------- Big Stepper ----------------------------- */
 
 class _QtyStepperBig extends StatelessWidget {
   const _QtyStepperBig({
@@ -399,7 +376,7 @@ class _StepIconButton extends StatelessWidget {
           width: size,
           height: size,
           decoration: BoxDecoration(
-            color: enabled ? AppColors.background : AppColors.background,
+            color: AppColors.background,
             borderRadius: BorderRadius.circular(tokens.radiusLg),
           ),
           alignment: Alignment.center,
@@ -479,33 +456,4 @@ class _EmptyCart extends StatelessWidget {
       ),
     );
   }
-}
-
-/* ----------------------------- model ----------------------------- */
-
-class _CartLine {
-  const _CartLine({
-    required this.itemName,
-    required this.bucketName,
-    required this.qty,
-    required this.maxQty,
-    required this.emoji,
-    required this.emojiBg,
-  });
-
-  final String itemName;
-  final String bucketName;
-  final int qty;
-  final int maxQty;
-  final String emoji;
-  final Color emojiBg;
-
-  _CartLine copyWith({int? qty}) => _CartLine(
-    itemName: itemName,
-    bucketName: bucketName,
-    qty: qty ?? this.qty,
-    maxQty: maxQty,
-    emoji: emoji,
-    emojiBg: emojiBg,
-  );
 }

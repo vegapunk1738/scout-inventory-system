@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import '../theme/app_theme.dart';
+import '../../theme/app_theme.dart';
 import '../widgets/admin_shell.dart';
 import 'manual_entry_page.dart';
 
