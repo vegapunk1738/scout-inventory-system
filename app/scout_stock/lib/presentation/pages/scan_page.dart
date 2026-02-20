@@ -443,19 +443,10 @@ class _ScanPageState extends State<ScanPage>
             fit: StackFit.expand,
             children: [
               // Keep scanner widget mounted (smoother switching)
-              Positioned.fill(
-                child: MediaQuery.removePadding(
-                  context: context,
-                  removeTop: true,
-                  removeBottom: true,
-                  removeLeft: true,
-                  removeRight: true,
-                  child: RepaintBoundary(
-                    child: MobileScanner(
-                      controller: _controller,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
+              RepaintBoundary(
+                child: MobileScanner(
+                  controller: _controller,
+                  fit: BoxFit.cover,
                 ),
               ),
 
