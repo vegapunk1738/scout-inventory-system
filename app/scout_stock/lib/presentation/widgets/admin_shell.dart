@@ -20,16 +20,12 @@ class AdminShellScope extends InheritedNotifier<ValueNotifier<int>> {
   }) : super(notifier: indexListenable);
 
   static ValueNotifier<int>? maybeOf(BuildContext context) {
-    return context
-        .dependOnInheritedWidgetOfExactType<AdminShellScope>()
-        ?.notifier;
+    return context.dependOnInheritedWidgetOfExactType<AdminShellScope>()?.notifier;
   }
 }
 
 class _AdminShellState extends State<AdminShell> {
-  late final ValueNotifier<int> _index = ValueNotifier<int>(
-    widget.initialIndex,
-  );
+  late final ValueNotifier<int> _index = ValueNotifier<int>(widget.initialIndex);
 
   @override
   void dispose() {
@@ -43,22 +39,16 @@ class _AdminShellState extends State<AdminShell> {
       indexListenable: _index,
       child: Scaffold(
         extendBody: true, // lets camera show behind glass nav
-        body: MediaQuery.removePadding(
-          context: context,
-          removeTop: true,
-          removeBottom: true,
-          removeLeft: true,
-          removeRight: true,
-          child: ValueListenableBuilder<int>(
-            valueListenable: _index,
-            builder: (_, i, _) =>
-                IndexedStack(index: i, children: widget.pages),
-          ),
+        body: ValueListenableBuilder<int>(
+          valueListenable: _index,
+          builder: (_, i, _) => IndexedStack(index: i, children: widget.pages),
         ),
         bottomNavigationBar: ValueListenableBuilder<int>(
           valueListenable: _index,
-          builder: (_, i, _) =>
-              _AdminBottomNav(index: i, onTap: (next) => _index.value = next),
+          builder: (_, i, _) => _AdminBottomNav(
+            index: i,
+            onTap: (next) => _index.value = next,
+          ),
         ),
       ),
     );
@@ -88,7 +78,10 @@ class _AdminBottomNav extends StatelessWidget {
           layoutBuilder: (currentChild, previousChildren) {
             return Stack(
               alignment: Alignment.bottomCenter,
-              children: <Widget>[...previousChildren, ?currentChild],
+              children: <Widget>[
+                ...previousChildren,
+                ?currentChild,
+              ],
             );
           },
           transitionBuilder: (child, animation) {
