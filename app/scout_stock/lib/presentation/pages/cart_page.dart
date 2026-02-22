@@ -7,7 +7,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:scout_stock/domain/models/item.dart';
 import 'package:scout_stock/presentation/widgets/admin_shell.dart';
 import 'package:scout_stock/presentation/widgets/checkout_result_dialog.dart';
+import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
+import 'package:scout_stock/presentation/widgets/hold_icon_button.dart';
 import 'package:scout_stock/state/providers/cart_provider.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
@@ -46,17 +48,30 @@ class _CartPageState extends ConsumerState<CartPage> {
 
     final emojiBase = GoogleFonts.notoColorEmoji(height: 1);
 
+    final safeBottom = MediaQuery.of(context).padding.bottom;
+
+    final btnHeight = compact ? 62.0 : 66.0;
+    final btnPadTop = compact ? 8.0 : 10.0;
+    final btnPadBottom = compact ? 10.0 : 12.0;
+
+    // Total vertical space the bottom button area occupies (including SafeArea).
+    final bottomBarFootprint =
+        btnHeight + btnPadTop + btnPadBottom + safeBottom;
+
+    // Let the list scroll behind the button, but allow the last item to scroll above it.
+    final listBottomPadding = bottomBarFootprint + 12;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: Padding(
-          padding: const EdgeInsets.only(left: 10.0),
+          padding: const EdgeInsets.only(left: 8.0),
           child: Text('Review Cart', style: t.titleLarge),
         ),
         centerTitle: false,
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 30.0),
+            padding: const EdgeInsets.only(right: 23.0),
             child: IconButton(
               tooltip: cart.undoCount > 0 ? 'Undo (${cart.undoCount})' : 'Undo',
               onPressed: cart.canUndo
@@ -67,9 +82,10 @@ class _CartPageState extends ConsumerState<CartPage> {
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          Expanded(
+          const Positioned.fill(child: DottedBackground()),
+          Positioned.fill(
             child: isEmpty
                 ? _EmptyCart(
                     emojiBase: emojiBase,
@@ -77,9 +93,15 @@ class _CartPageState extends ConsumerState<CartPage> {
                     bodyStyle: t.bodyLarge?.copyWith(color: AppColors.muted),
                   )
                 : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                    padding: EdgeInsets.fromLTRB(
+                      compact ? 12 : 14,
+                      compact ? 12 : 14,
+                      compact ? 12 : 14,
+                      listBottomPadding,
+                    ),
                     itemCount: items.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 14),
+                    separatorBuilder: (_, __) =>
+                        SizedBox(height: compact ? 10 : 12),
                     addAutomaticKeepAlives: false,
                     addRepaintBoundaries: false,
                     itemBuilder: (context, i) {
@@ -90,56 +112,86 @@ class _CartPageState extends ConsumerState<CartPage> {
                         tokens: tokens,
                         textTheme: t,
                         emojiBase: emojiBase,
-                        onMinus: () =>
-                            ref.read(cartProvider.notifier).decrement(item.id),
-                        onPlus: () =>
-                            ref.read(cartProvider.notifier).increment(item.id),
                         onRemove: () =>
                             ref.read(cartProvider.notifier).remove(item.id),
+                        onDelta: (d) =>
+                            ref.read(cartProvider.notifier).bump(item.id, d),
                       );
                     },
                   ),
           ),
-          GlowingActionButton(
-            label: 'Confirm Checkout ($totalItems)',
-            icon: const Icon(Icons.check_rounded),
-            loading: _submitting,
-            onPressed: isEmpty
-                ? null
-                : () async {
-                    setState(() => _submitting = true);
-                    try {
-                      final res = await _checkoutRequest();
-                      if (!mounted) return;
 
-                      if (res.ok) {
-                        await showCheckoutResultDialog(
-                          context,
-                          child: CheckoutResultDialog.success(
-                            transactionId: res.txnId!,
-                            onFinish: () {
-                              ref.read(cartProvider.notifier).clear();
+          // Soft scrim so content behind the button doesn’t look harsh.
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: IgnorePointer(
+              child: Container(
+                height: bottomBarFootprint + 24,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      AppColors.background.withValues(alpha: 0.0),
+                      AppColors.background,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
 
-                              final idx = AdminShellScope.maybeOf(context);
-                              if (idx != null) idx.value = 0;
-                            },
-                          ),
-                        );
-                      } else {
-                        await showCheckoutResultDialog(
-                          context,
-                          child: CheckoutResultDialog.failure(
-                            errorCode: res.error,
-                            onRetry: () {},
-                            onClose: () {},
-                          ),
-                          barrierDismissible: true,
-                        );
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: GlowingActionButton(
+              label: 'Confirm Checkout ($totalItems)',
+              icon: const Icon(Icons.check_rounded),
+              loading: _submitting,
+              height: btnHeight,
+              padding: EdgeInsets.fromLTRB(
+                compact ? 14 : 16,
+                btnPadTop,
+                compact ? 14 : 16,
+                btnPadBottom,
+              ),
+              onPressed: isEmpty
+                  ? null
+                  : () async {
+                      setState(() => _submitting = true);
+                      try {
+                        final res = await _checkoutRequest();
+                        if (!mounted) return;
+
+                        if (res.ok) {
+                          await showCheckoutResultDialog(
+                            context,
+                            child: CheckoutResultDialog.success(
+                              transactionId: res.txnId!,
+                              onFinish: () {
+                                ref.read(cartProvider.notifier).clear();
+                                final idx = AdminShellScope.maybeOf(context);
+                                if (idx != null) idx.value = 0;
+                              },
+                            ),
+                          );
+                        } else {
+                          await showCheckoutResultDialog(
+                            context,
+                            child: CheckoutResultDialog.failure(
+                              errorCode: res.error,
+                              onRetry: () {},
+                              onClose: () {},
+                            ),
+                            barrierDismissible: true,
+                          );
+                        }
+                      } finally {
+                        if (mounted) setState(() => _submitting = false);
                       }
-                    } finally {
-                      if (mounted) setState(() => _submitting = false);
-                    }
-                  },
+                    },
+            ),
           ),
         ],
       ),
@@ -156,9 +208,8 @@ class _CartItemCard extends StatelessWidget {
     required this.tokens,
     required this.textTheme,
     required this.emojiBase,
-    required this.onMinus,
-    required this.onPlus,
     required this.onRemove,
+    required this.onDelta,
   });
 
   final Item item;
@@ -167,20 +218,19 @@ class _CartItemCard extends StatelessWidget {
   final TextTheme textTheme;
   final TextStyle emojiBase;
 
-  final VoidCallback onMinus;
-  final VoidCallback onPlus;
   final VoidCallback onRemove;
+  final ValueChanged<int> onDelta;
 
   @override
   Widget build(BuildContext context) {
-    final tile = compact ? 48.0 : 54.0;
-    final emojiSize = compact ? 24.0 : 28.0;
+    final tile = compact ? 42.0 : 48.0;
+    final emojiSize = compact ? 22.0 : 26.0;
 
     final shadow = tokens.cardShadow.isNotEmpty
         ? [
             tokens.cardShadow.first.copyWith(
-              blurRadius: 14,
-              offset: const Offset(0, 8),
+              blurRadius: 12,
+              offset: const Offset(0, 7),
             ),
           ]
         : const <BoxShadow>[];
@@ -191,7 +241,7 @@ class _CartItemCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(tokens.radiusXl),
         boxShadow: shadow,
       ),
-      padding: EdgeInsets.all(compact ? 12 : 14),
+      padding: EdgeInsets.all(compact ? 10 : 12),
       child: Column(
         children: [
           Row(
@@ -211,10 +261,10 @@ class _CartItemCard extends StatelessWidget {
                   style: emojiBase.copyWith(fontSize: emojiSize),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.only(top: 2),
+                  padding: const EdgeInsets.only(top: 1),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -223,10 +273,11 @@ class _CartItemCard extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: textTheme.titleMedium?.copyWith(
-                          fontSize: compact ? 16 : 18,
+                          fontSize: compact ? 15 : 16,
+                          height: 1.15,
                         ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       Text(
                         '${item.bucketName} | ${item.bucketId}',
                         maxLines: 1,
@@ -234,7 +285,8 @@ class _CartItemCard extends StatelessWidget {
                         style: textTheme.bodyMedium?.copyWith(
                           color: AppColors.muted,
                           fontWeight: FontWeight.w700,
-                          fontSize: compact ? 12 : 13,
+                          fontSize: compact ? 11.5 : 12,
+                          height: 1.1,
                         ),
                       ),
                     ],
@@ -245,13 +297,12 @@ class _CartItemCard extends StatelessWidget {
               _TrashPillButton(compact: compact, onTap: onRemove),
             ],
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: compact ? 10 : 12),
           _QtyStepperBig(
             value: item.quantity,
             max: item.maxQuantity,
             compact: compact,
-            onMinus: onMinus,
-            onPlus: onPlus,
+            onDelta: onDelta,
           ),
         ],
       ),
@@ -259,22 +310,20 @@ class _CartItemCard extends StatelessWidget {
   }
 }
 
-/* ----------------------------- Big Stepper ----------------------------- */
+/* ----------------------------- Big Stepper (tap + hold) ----------------------------- */
 
 class _QtyStepperBig extends StatelessWidget {
   const _QtyStepperBig({
     required this.value,
     required this.max,
     required this.compact,
-    required this.onMinus,
-    required this.onPlus,
+    required this.onDelta,
   });
 
   final int value;
   final int max;
   final bool compact;
-  final VoidCallback onMinus;
-  final VoidCallback onPlus;
+  final ValueChanged<int> onDelta;
 
   @override
   Widget build(BuildContext context) {
@@ -284,9 +333,11 @@ class _QtyStepperBig extends StatelessWidget {
     final canMinus = value > 1;
     final canPlus = value < max;
 
-    final height = compact ? 56.0 : 62.0;
-    final btnSize = compact ? 46.0 : 50.0;
-    final iconSize = compact ? 22.0 : 24.0;
+    final height = compact ? 50.0 : 56.0;
+    final btnSize = compact ? 40.0 : 44.0;
+    final iconSize = compact ? 20.0 : 22.0;
+
+    final disabledFg = AppColors.muted.withValues(alpha: 0.45);
 
     return Container(
       height: height,
@@ -298,13 +349,23 @@ class _QtyStepperBig extends StatelessWidget {
       child: Row(
         children: [
           const SizedBox(width: 6),
-          _StepIconButton(
-            icon: Icons.remove_rounded,
-            size: btnSize,
-            iconSize: iconSize,
+
+          // MINUS (tap + hold)
+          HoldIconButton(
             enabled: canMinus,
-            onTap: canMinus ? onMinus : null,
+            maxCount: max,
+            icon: Icons.remove_rounded,
+            iconColor: canMinus ? AppColors.primary : disabledFg,
+            fill: AppColors.background,
+            border: Colors.transparent,
+            width: btnSize,
+            height: btnSize,
+            iconSize: iconSize,
+            radius: tokens.radiusLg,
+            onTap: canMinus ? () => onDelta(-1) : null,
+            onHoldTick: canMinus ? (step) => onDelta(-step) : null,
           ),
+
           const SizedBox(width: 6),
           Expanded(
             child: Center(
@@ -313,8 +374,10 @@ class _QtyStepperBig extends StatelessWidget {
                 children: [
                   Text(
                     '$value',
-                    style: (compact ? t.headlineSmall : t.headlineMedium)
-                        ?.copyWith(fontWeight: FontWeight.w900, height: 1),
+                    style: (compact ? t.titleLarge : t.headlineSmall)?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      height: 1,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -330,58 +393,25 @@ class _QtyStepperBig extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
-          _StepIconButton(
-            icon: Icons.add_rounded,
-            size: btnSize,
-            iconSize: iconSize,
+
+          // PLUS (tap + hold)
+          HoldIconButton(
             enabled: canPlus,
-            onTap: canPlus ? onPlus : null,
+            maxCount: max,
+            icon: Icons.add_rounded,
+            iconColor: canPlus ? AppColors.primary : disabledFg,
+            fill: AppColors.background,
+            border: Colors.transparent,
+            width: btnSize,
+            height: btnSize,
+            iconSize: iconSize,
+            radius: tokens.radiusLg,
+            onTap: canPlus ? () => onDelta(1) : null,
+            onHoldTick: canPlus ? (step) => onDelta(step) : null,
           ),
+
           const SizedBox(width: 6),
         ],
-      ),
-    );
-  }
-}
-
-class _StepIconButton extends StatelessWidget {
-  const _StepIconButton({
-    required this.icon,
-    required this.size,
-    required this.iconSize,
-    required this.enabled,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final double size;
-  final double iconSize;
-  final bool enabled;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = Theme.of(context).extension<AppTokens>()!;
-    final fg = enabled
-        ? AppColors.primary
-        : AppColors.muted.withValues(alpha: 0.45);
-
-    return Semantics(
-      button: true,
-      enabled: enabled,
-      child: InkResponse(
-        onTap: onTap,
-        radius: 28,
-        child: Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            color: AppColors.background,
-            borderRadius: BorderRadius.circular(tokens.radiusLg),
-          ),
-          alignment: Alignment.center,
-          child: Icon(icon, size: iconSize, color: fg),
-        ),
       ),
     );
   }
@@ -396,12 +426,12 @@ class _TrashPillButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
-    final box = compact ? 38.0 : 42.0;
-    final iconSize = compact ? 20.0 : 22.0;
+    final box = compact ? 34.0 : 38.0;
+    final iconSize = compact ? 18.0 : 20.0;
 
     return InkResponse(
       onTap: onTap,
-      radius: 24,
+      radius: 22,
       child: Container(
         width: box,
         height: box,
@@ -438,8 +468,8 @@ class _EmptyCart extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('🛒', style: emojiBase.copyWith(fontSize: 56)),
-            const SizedBox(height: 12),
+            Text('🛒', style: emojiBase.copyWith(fontSize: 54)),
+            const SizedBox(height: 10),
             Text(
               'Your cart is empty',
               style: titleStyle,

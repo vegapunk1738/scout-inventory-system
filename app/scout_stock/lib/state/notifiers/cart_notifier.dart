@@ -9,10 +9,7 @@ class RemovedCartEntry {
 }
 
 class CartState {
-  const CartState({
-    required this.items,
-    required this.undoStack,
-  });
+  const CartState({required this.items, required this.undoStack});
 
   final List<Item> items;
   final List<RemovedCartEntry> undoStack;
@@ -20,10 +17,7 @@ class CartState {
   bool get canUndo => undoStack.isNotEmpty;
   int get undoCount => undoStack.length;
 
-  CartState copyWith({
-    List<Item>? items,
-    List<RemovedCartEntry>? undoStack,
-  }) {
+  CartState copyWith({List<Item>? items, List<RemovedCartEntry>? undoStack}) {
     return CartState(
       items: items ?? this.items,
       undoStack: undoStack ?? this.undoStack,
@@ -83,13 +77,20 @@ class CartNotifier extends Notifier<CartState> {
 
     if (idx == -1) {
       final q = item.quantity.clamp(1, item.maxQuantity);
-      state = state.copyWith(items: [...items, item.copyWith(quantity: q)]);
+      state = state.copyWith(
+        items: [
+          ...items,
+          item.copyWith(quantity: q),
+        ],
+      );
       return;
     }
 
     final current = items[idx];
-    final nextQty =
-        (current.quantity + item.quantity).clamp(1, current.maxQuantity);
+    final nextQty = (current.quantity + item.quantity).clamp(
+      1,
+      current.maxQuantity,
+    );
 
     final updated = [...items];
     updated[idx] = current.copyWith(quantity: nextQty);
@@ -130,7 +131,10 @@ class CartNotifier extends Notifier<CartState> {
     final removed = items[idx];
 
     final updatedItems = [...items]..removeAt(idx);
-    final updatedUndo = [...state.undoStack, RemovedCartEntry(item: removed, index: idx)];
+    final updatedUndo = [
+      ...state.undoStack,
+      RemovedCartEntry(item: removed, index: idx),
+    ];
 
     state = state.copyWith(items: updatedItems, undoStack: updatedUndo);
   }
@@ -151,9 +155,12 @@ class CartNotifier extends Notifier<CartState> {
       );
     } else {
       final insertAt = entry.index.clamp(0, items.length);
-      items.insert(insertAt, entry.item.copyWith(
-        quantity: entry.item.quantity.clamp(1, entry.item.maxQuantity),
-      ));
+      items.insert(
+        insertAt,
+        entry.item.copyWith(
+          quantity: entry.item.quantity.clamp(1, entry.item.maxQuantity),
+        ),
+      );
     }
 
     state = state.copyWith(items: items, undoStack: undo);
@@ -161,5 +168,21 @@ class CartNotifier extends Notifier<CartState> {
 
   void clear() {
     state = const CartState(items: [], undoStack: []);
+  }
+
+  void bump(String itemId, int delta) {
+    final items = state.items;
+    final idx = items.indexWhere((x) => x.id == itemId);
+    if (idx == -1) return;
+
+    final it = items[idx];
+    final nextQty = (it.quantity + delta).clamp(1, it.maxQuantity);
+
+    if (nextQty == it.quantity) return;
+
+    final nextItems = [...items];
+    nextItems[idx] = it.copyWith(quantity: nextQty);
+
+    state = state.copyWith(items: nextItems);
   }
 }

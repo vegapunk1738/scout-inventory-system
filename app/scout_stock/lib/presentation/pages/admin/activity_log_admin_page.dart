@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
 enum ActivityAction { checkOut, checkIn }
@@ -241,112 +242,117 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final mediaTop = MediaQuery.of(context).padding.top;
-    
+
     final isEmpty = !_initialLoading && _loaded.isEmpty;
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: SafeArea(
-        top: false,
-        child: CustomScrollView(
-          controller: _scrollCtrl,
-          cacheExtent: 900,
-          slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
-                child: ActivityLogHeader(
-                  controller: _searchCtrl,
-                  onChanged: _onSearchChanged,
-                  onFilter: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("Filter coming soon")),
-                    );
-                  },
-                  onExport: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("Export coming soon")),
-                    );
-                  },
-                ),
-              ),
-            ),
-
-            if (_initialLoading)
-              const SliverFillRemaining(
-                hasScrollBody: false,
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (isEmpty)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: _EmptyActivityState(query: _query),
-              )
-            else
-              SliverPadding(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, 0),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      final row = _rows[index];
-                      if (row.kind == _RowKind.groupHeader) {
-                        return _GroupHeaderRow(
-                          titleLeft: row.titleLeft!,
-                          titleRight: row.titleRight!,
-                          topGap: row.topGap,
+      body: Stack(
+        children: [
+          const Positioned.fill(child: DottedBackground()),
+          SafeArea(
+            top: false,
+            child: CustomScrollView(
+              controller: _scrollCtrl,
+              cacheExtent: 900,
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
+                    child: ActivityLogHeader(
+                      controller: _searchCtrl,
+                      onChanged: _onSearchChanged,
+                      onFilter: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text("Filter coming soon")),
                         );
-                      }
-
-                      final txn = row.txn!;
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: RepaintBoundary(
-                          child: _ExpandableTxnCard(
-                            txn: txn,
-                            expanded: _exp(txn.id),
-                            radiusXl: tokens.radiusXl,
-                          ),
-                        ),
-                      );
-                    },
-                    childCount: _rows.length,
-                    addAutomaticKeepAlives: false,
-                    addRepaintBoundaries: true,
-                    addSemanticIndexes: false,
+                      },
+                      onExport: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text("Export coming soon")),
+                        );
+                      },
+                    ),
                   ),
                 ),
-              ),
 
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(16, 6, 16, 6),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (!_initialLoading && !isEmpty && _loadingMore)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 10),
-                        child: SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    else if (!_initialLoading && !isEmpty && !_hasMore)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Text(
-                          "No more activity",
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(color: AppColors.muted),
-                        ),
+                if (_initialLoading)
+                  const SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _EmptyActivityState(query: _query),
+                  )
+                else
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(16, 0, 16, 0),
+                    sliver: SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final row = _rows[index];
+                          if (row.kind == _RowKind.groupHeader) {
+                            return _GroupHeaderRow(
+                              titleLeft: row.titleLeft!,
+                              titleRight: row.titleRight!,
+                              topGap: row.topGap,
+                            );
+                          }
+
+                          final txn = row.txn!;
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: RepaintBoundary(
+                              child: _ExpandableTxnCard(
+                                txn: txn,
+                                expanded: _exp(txn.id),
+                                radiusXl: tokens.radiusXl,
+                              ),
+                            ),
+                          );
+                        },
+                        childCount: _rows.length,
+                        addAutomaticKeepAlives: false,
+                        addRepaintBoundaries: true,
+                        addSemanticIndexes: false,
                       ),
-                  ],
+                    ),
+                  ),
+
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(16, 6, 16, 6),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (!_initialLoading && !isEmpty && _loadingMore)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 10),
+                            child: SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        else if (!_initialLoading && !isEmpty && !_hasMore)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            child: Text(
+                              "No more activity",
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(color: AppColors.muted),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

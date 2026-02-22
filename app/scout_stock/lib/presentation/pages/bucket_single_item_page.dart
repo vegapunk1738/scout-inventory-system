@@ -1,14 +1,13 @@
-import 'dart:async';
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:scout_stock/state/providers/cart_provider.dart';
 
-import '../../domain/models/item.dart';
-import '../../theme/app_theme.dart';
-import '../widgets/glowing_action_button.dart';
+import 'package:scout_stock/domain/models/item.dart';
+import 'package:scout_stock/presentation/widgets/dotted_background.dart';
+import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
+import 'package:scout_stock/presentation/widgets/hold_icon_button.dart';
+import 'package:scout_stock/state/providers/cart_provider.dart';
+import 'package:scout_stock/theme/app_theme.dart';
 
 class BucketItemPage extends ConsumerStatefulWidget {
   const BucketItemPage({super.key, required this.barcode});
@@ -31,30 +30,6 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
   int qty = 12;
 
   bool _loading = false;
-
-  late final _HoldRepeater _incHold;
-  late final _HoldRepeater _decHold;
-
-  @override
-  void initState() {
-    super.initState();
-
-    _incHold = _HoldRepeater(
-      maxCount: maxCount,
-      onTick: (step) => _applyDelta(step),
-    );
-    _decHold = _HoldRepeater(
-      maxCount: maxCount,
-      onTick: (step) => _applyDelta(-step),
-    );
-  }
-
-  @override
-  void dispose() {
-    _incHold.dispose();
-    _decHold.dispose();
-    super.dispose();
-  }
 
   void _applyDelta(int delta) {
     if (!mounted) return;
@@ -117,7 +92,7 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
       appBar: AppBar(leading: const BackButton()),
       body: Stack(
         children: [
-          const Positioned.fill(child: _DottedBackground()),
+          const Positioned.fill(child: DottedBackground()),
           SafeArea(
             top: false,
             child: ListView(
@@ -138,13 +113,13 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
                         bucketName,
                         textAlign: TextAlign.center,
                         style: t.headlineMedium,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
                 ),
-
                 const SizedBox(height: 22),
-
                 Center(
                   child: Container(
                     width: 150,
@@ -171,9 +146,7 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 22),
-
                 Center(
                   child: Text(
                     itemName,
@@ -181,9 +154,7 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
                     style: t.headlineMedium?.copyWith(fontSize: 34),
                   ),
                 ),
-
                 const SizedBox(height: 40),
-
                 Center(
                   child: RichText(
                     text: TextSpan(
@@ -212,9 +183,7 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 12),
-
                 Center(
                   child: Text(
                     'Hold + / − to go faster',
@@ -224,14 +193,12 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 110),
               ],
             ),
           ),
         ],
       ),
-
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -247,18 +214,24 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
               ),
               child: Row(
                 children: [
-                  _HoldIconButton(
+                  // MINUS (tap + hold)
+                  HoldIconButton(
                     enabled: canDec,
+                    maxCount: maxCount,
                     fill: const Color(0xFFF8FAFC),
                     border: AppColors.outline,
                     icon: Icons.remove,
                     iconColor: canDec
                         ? AppColors.ink.withValues(alpha: 0.70)
                         : AppColors.ink.withValues(alpha: 0.25),
+                    width: 64,
+                    height: 62,
+                    iconSize: 30,
+                    radius: tokens.radiusXl,
                     onTap: canDec ? _decTap : null,
-                    onHoldStart: canDec ? _decHold.start : null,
-                    onHoldEnd: _decHold.stop,
+                    onHoldTick: canDec ? (step) => _applyDelta(-step) : null,
                   ),
+
                   const SizedBox(width: 12),
                   Expanded(
                     child: Container(
@@ -279,22 +252,27 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  _HoldIconButton(
+
+                  // PLUS (tap + hold)
+                  HoldIconButton(
                     enabled: canInc,
+                    maxCount: maxCount,
                     fill: AppColors.primary,
                     border: Colors.transparent,
                     glow: true,
                     icon: Icons.add,
                     iconColor: Colors.white,
+                    width: 64,
+                    height: 62,
+                    iconSize: 30,
+                    radius: tokens.radiusXl,
                     onTap: canInc ? _incTap : null,
-                    onHoldStart: canInc ? _incHold.start : null,
-                    onHoldEnd: _incHold.stop,
+                    onHoldTick: canInc ? (step) => _applyDelta(step) : null,
                   ),
                 ],
               ),
             ),
           ),
-
           GlowingActionButton(
             label: 'ADD TO CART',
             icon: const Icon(Icons.shopping_cart_rounded),
@@ -306,190 +284,5 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
         ],
       ),
     );
-  }
-}
-
-/* ------------------------- Hold-to-accelerate ------------------------- */
-
-class _HoldRepeater {
-  _HoldRepeater({required int maxCount, required this.onTick})
-    : _maxCount = math.max(1, maxCount),
-      _tickEvery = _calcTickEvery(math.max(1, maxCount)),
-      _doubleEveryTicks = _calcDoubleEveryTicks(math.max(1, maxCount)),
-      _capStep = _calcCapStep(math.max(1, maxCount)),
-      _holdDelay = _calcHoldDelay(math.max(1, maxCount));
-
-  final void Function(int step) onTick;
-
-  final int _maxCount;
-  final Duration _tickEvery;
-  final Duration _holdDelay;
-  final int _doubleEveryTicks;
-  final int _capStep;
-
-  Timer? _delayTimer;
-  Timer? _repeatTimer;
-
-  int _ticks = 0;
-  int _step = 1;
-
-  static double _log10(int x) => math.log(x.toDouble()) / math.ln10;
-
-  static Duration _calcTickEvery(int max) {
-    final m = _log10(max).clamp(1.0, 4.0);
-    final ms = (80 - (m * 10)).round().clamp(45, 80);
-    return Duration(milliseconds: ms);
-  }
-
-  static Duration _calcHoldDelay(int max) {
-    final m = _log10(max).clamp(1.0, 4.0);
-    final ms = (240 - (m * 20)).round().clamp(150, 240);
-    return Duration(milliseconds: ms);
-  }
-
-  static int _calcDoubleEveryTicks(int max) {
-    final m = _log10(max).clamp(1.0, 4.0);
-    final v = (8 - (m * 2)).round().clamp(2, 8);
-    return v;
-  }
-
-  static int _calcCapStep(int max) {
-    return ((max / 4).ceil()).clamp(1, 2000);
-  }
-
-  void start() {
-    stop();
-
-    _delayTimer = Timer(_holdDelay, () {
-      _ticks = 0;
-      _step = 1;
-
-      _repeatTimer = Timer.periodic(_tickEvery, (_) {
-        _ticks++;
-
-        if (_ticks % _doubleEveryTicks == 0) {
-          _step = math.min(_step * 2, _capStep);
-        }
-
-        onTick(_step);
-      });
-    });
-  }
-
-  void stop() {
-    _delayTimer?.cancel();
-    _delayTimer = null;
-
-    _repeatTimer?.cancel();
-    _repeatTimer = null;
-  }
-
-  void dispose() => stop();
-}
-
-/* ------------------------------ UI Bits ------------------------------ */
-
-class _HoldIconButton extends StatelessWidget {
-  const _HoldIconButton({
-    required this.enabled,
-    required this.fill,
-    required this.border,
-    required this.icon,
-    required this.iconColor,
-    required this.onHoldEnd,
-    this.onTap,
-    this.onHoldStart,
-    this.glow = false,
-  });
-
-  final bool enabled;
-  final Color fill;
-  final Color border;
-  final IconData icon;
-  final Color iconColor;
-  final bool glow;
-
-  final VoidCallback? onTap;
-  final VoidCallback? onHoldStart;
-  final VoidCallback onHoldEnd;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = Theme.of(context).extension<AppTokens>()!;
-
-    return AnimatedOpacity(
-      duration: const Duration(milliseconds: 120),
-      opacity: enabled ? 1.0 : 0.55,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(tokens.radiusXl),
-          boxShadow: glow && enabled ? tokens.glowShadow : const [],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: enabled ? onTap : null,
-            onTapDown: enabled ? (_) => onHoldStart?.call() : null,
-            onTapUp: enabled ? (_) => onHoldEnd() : null,
-            onTapCancel: onHoldEnd,
-            borderRadius: BorderRadius.circular(tokens.radiusXl),
-            child: Container(
-              width: 64,
-              height: 62,
-              decoration: BoxDecoration(
-                color: fill,
-                borderRadius: BorderRadius.circular(tokens.radiusXl),
-                border: Border.all(color: border),
-              ),
-              child: Center(child: Icon(icon, size: 30, color: iconColor)),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DottedBackground extends StatelessWidget {
-  const _DottedBackground();
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: _DotsPainter(
-        dotColor: AppColors.ink.withValues(alpha: 0.05),
-        spacing: 18,
-        radius: 1.2,
-      ),
-    );
-  }
-}
-
-class _DotsPainter extends CustomPainter {
-  _DotsPainter({
-    required this.dotColor,
-    required this.spacing,
-    required this.radius,
-  });
-
-  final Color dotColor;
-  final double spacing;
-  final double radius;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = dotColor;
-    for (double y = 0; y < size.height; y += spacing) {
-      for (double x = 0; x < size.width; x += spacing) {
-        canvas.drawCircle(Offset(x, y), radius, paint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DotsPainter oldDelegate) {
-    return oldDelegate.dotColor != dotColor ||
-        oldDelegate.spacing != spacing ||
-        oldDelegate.radius != radius;
   }
 }

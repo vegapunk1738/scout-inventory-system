@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 
 import 'package:scout_stock/state/notifiers/me_notifier.dart';
 import 'package:scout_stock/state/providers/me_provider.dart';
@@ -9,6 +10,7 @@ import 'package:scout_stock/state/providers/current_user_provider.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 import 'package:scout_stock/presentation/widgets/checkout_result_dialog.dart';
 import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
+import 'package:scout_stock/presentation/widgets/hold_icon_button.dart';
 
 class MePage extends ConsumerWidget {
   const MePage({super.key});
@@ -20,18 +22,34 @@ class MePage extends ConsumerWidget {
 
     final userAsync = ref.watch(currentUserProvider);
 
+    final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
+
     final top = MediaQuery.of(context).padding.top;
+    final safeBottom = MediaQuery.of(context).padding.bottom;
     final compact = MediaQuery.sizeOf(context).width < 380;
 
+    // Match CartPage shadow
     final shadow = tokens.cardShadow.isNotEmpty
         ? [
             tokens.cardShadow.first.copyWith(
-              blurRadius: 14,
-              offset: const Offset(0, 8),
+              blurRadius: 12,
+              offset: const Offset(0, 7),
             ),
           ]
         : const <BoxShadow>[];
+
+    // Bottom button sizing identical to CartPage
+    final btnHeight = compact ? 62.0 : 66.0;
+    final btnPadding = EdgeInsets.fromLTRB(
+      compact ? 14 : 16,
+      compact ? 8 : 10,
+      compact ? 14 : 16,
+      compact ? 10 : 12,
+    );
+
+    final bottomBarFootprint = btnHeight + btnPadding.vertical + safeBottom;
+    final listBottomSpacer = bottomBarFootprint + 12;
 
     // User-derived header info (global user)
     final displayName = userAsync.maybeWhen(
@@ -108,13 +126,16 @@ class MePage extends ConsumerWidget {
 
     final emojiBase = GoogleFonts.notoColorEmoji(height: 1);
 
+    // List padding identical to CartPage
+    final listSide = compact ? 12.0 : 14.0;
+
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: SafeArea(
-        top: false,
-        child: Stack(
-          children: [
-            CustomScrollView(
+      body: Stack(
+        children: [
+          const Positioned.fill(child: DottedBackground()),
+          Positioned.fill(
+            child: CustomScrollView(
               slivers: [
                 SliverToBoxAdapter(
                   child: Padding(
@@ -153,7 +174,7 @@ class MePage extends ConsumerWidget {
                   )
                 else
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                    padding: EdgeInsets.fromLTRB(listSide, 0, listSide, 0),
                     sliver: SliverList(
                       delegate: SliverChildBuilderDelegate((context, i) {
                         final r = rows[i];
@@ -172,13 +193,14 @@ class MePage extends ConsumerWidget {
                           final line = r.borrowed!;
                           return Padding(
                             key: ValueKey("b_${line.id}"),
-                            padding: const EdgeInsets.only(bottom: 12),
+                            padding: EdgeInsets.only(bottom: compact ? 10 : 12),
                             child: RepaintBoundary(
                               child: _BorrowedCard(
                                 record: line,
-                                tokens: tokens,
                                 compact: compact,
+                                tokens: tokens,
                                 shadow: shadow,
+                                textTheme: t,
                                 emojiBase: emojiBase,
                                 onChanged: (next) =>
                                     notifier.setToReturn(line.id, next),
@@ -195,13 +217,14 @@ class MePage extends ConsumerWidget {
                         final line = r.returned!;
                         return Padding(
                           key: ValueKey("r_${line.id}"),
-                          padding: const EdgeInsets.only(bottom: 12),
+                          padding: EdgeInsets.only(bottom: compact ? 10 : 12),
                           child: RepaintBoundary(
                             child: _ReturnedCard(
                               record: line,
-                              tokens: tokens,
                               compact: compact,
+                              tokens: tokens,
                               shadow: shadow,
+                              textTheme: t,
                               emojiBase: emojiBase,
                               faded: faded,
                               crossline: crossline,
@@ -211,27 +234,55 @@ class MePage extends ConsumerWidget {
                       }, childCount: rows.length),
                     ),
                   ),
+
+                // Spacer so last item can scroll fully above the fixed button
                 SliverToBoxAdapter(
-                  child: SizedBox(height: showBottomReturn ? 120 : 22),
+                  child: SizedBox(
+                    height: showBottomReturn ? listBottomSpacer : 22,
+                  ),
                 ),
               ],
             ),
-            if (showBottomReturn)
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: GlowingActionButton(
-                  label: me.totalToReturn == 1
-                      ? "Return Items (1)"
-                      : "Return Items (${me.totalToReturn})",
-                  icon: const Icon(Icons.keyboard_return_rounded),
-                  loading: me.submitting,
-                  onPressed: me.submitting ? null : onReturn,
-                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
-                  height: 74,
+          ),
+
+          // Soft scrim behind the fixed bottom button (same idea as CartPage)
+          if (showBottomReturn)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                child: Container(
+                  height: bottomBarFootprint + 24,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        AppColors.background.withValues(alpha: 0.0),
+                        AppColors.background,
+                      ],
+                    ),
+                  ),
                 ),
               ),
-          ],
-        ),
+            ),
+
+          if (showBottomReturn)
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: GlowingActionButton(
+                label: me.totalToReturn == 1
+                    ? "Return Items (1)"
+                    : "Return Items (${me.totalToReturn})",
+                icon: const Icon(Icons.keyboard_return_rounded),
+                loading: me.submitting,
+                onPressed: me.submitting ? null : onReturn,
+                padding: btnPadding, // identical to CartPage
+                height: btnHeight, // identical to CartPage
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -290,18 +341,21 @@ class _MeHeader extends StatelessWidget {
             ],
           ),
         ),
-        Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(tokens.radiusLg),
-            border: Border.all(color: AppColors.outline),
-          ),
-          child: IconButton(
-            onPressed: onSettings,
-            icon: const Icon(Icons.settings_rounded),
-            splashRadius: 22,
+        Visibility(
+          visible: false,
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(tokens.radiusLg),
+              border: Border.all(color: AppColors.outline),
+            ),
+            child: IconButton(
+              onPressed: onSettings,
+              icon: const Icon(Icons.settings_rounded),
+              splashRadius: 22,
+            ),
           ),
         ),
       ],
@@ -535,34 +589,33 @@ class _DateHeader extends StatelessWidget {
   }
 }
 
-/* ----------------------------- Borrowed Card ----------------------------- */
+/* ----------------------------- Borrowed Card (MATCH CART SCALE) ----------------------------- */
 
 class _BorrowedCard extends StatelessWidget {
   const _BorrowedCard({
     required this.record,
-    required this.tokens,
     required this.compact,
+    required this.tokens,
     required this.shadow,
+    required this.textTheme,
     required this.emojiBase,
     required this.onChanged,
   });
 
   final BorrowedRecord record;
-  final AppTokens tokens;
   final bool compact;
+  final AppTokens tokens;
   final List<BoxShadow> shadow;
+  final TextTheme textTheme;
   final TextStyle emojiBase;
   final ValueChanged<int> onChanged;
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-
-    final tile = compact ? 48.0 : 54.0;
-    final emojiSize = compact ? 24.0 : 28.0;
+    final tile = compact ? 42.0 : 48.0;
+    final emojiSize = compact ? 22.0 : 26.0;
 
     final item = record.item;
-    final bg = _emojiBgFor(item.id);
 
     return Container(
       decoration: BoxDecoration(
@@ -570,7 +623,7 @@ class _BorrowedCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(tokens.radiusXl),
         boxShadow: shadow,
       ),
-      padding: EdgeInsets.all(compact ? 12 : 14),
+      padding: EdgeInsets.all(compact ? 10 : 12),
       child: Column(
         children: [
           Row(
@@ -580,8 +633,9 @@ class _BorrowedCard extends StatelessWidget {
                 width: tile,
                 height: tile,
                 decoration: BoxDecoration(
-                  color: bg,
+                  color: AppColors.background,
                   borderRadius: BorderRadius.circular(tokens.radiusLg),
+                  border: Border.all(color: AppColors.outline),
                 ),
                 alignment: Alignment.center,
                 child: Text(
@@ -589,10 +643,10 @@ class _BorrowedCard extends StatelessWidget {
                   style: emojiBase.copyWith(fontSize: emojiSize),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.only(top: 2),
+                  padding: const EdgeInsets.only(top: 1),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -600,19 +654,21 @@ class _BorrowedCard extends StatelessWidget {
                         item.name,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: t.titleMedium?.copyWith(
-                          fontSize: compact ? 16 : 18,
+                        style: textTheme.titleMedium?.copyWith(
+                          fontSize: compact ? 15 : 16,
+                          height: 1.15,
                         ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       Text(
-                        'Bucket: ${item.bucketName} • ${item.bucketId}',
+                        '${item.bucketName} | ${item.bucketId}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: t.bodyMedium?.copyWith(
+                        style: textTheme.bodyMedium?.copyWith(
                           color: AppColors.muted,
                           fontWeight: FontWeight.w700,
-                          fontSize: compact ? 12 : 13,
+                          fontSize: compact ? 11.5 : 12,
+                          height: 1.1,
                         ),
                       ),
                     ],
@@ -621,13 +677,14 @@ class _BorrowedCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          _ReturnQtyStepperBig(
+          SizedBox(height: compact ? 10 : 12),
+
+          // ✅ tap + hold accelerator
+          _ReturnQtyStepperHold(
             value: item.quantity,
             max: item.maxQuantity,
             compact: compact,
-            onMinus: () => onChanged(item.quantity - 1),
-            onPlus: () => onChanged(item.quantity + 1),
+            onChanged: onChanged,
           ),
         ],
       ),
@@ -635,20 +692,155 @@ class _BorrowedCard extends StatelessWidget {
   }
 }
 
-class _ReturnQtyStepperBig extends StatelessWidget {
-  const _ReturnQtyStepperBig({
+/* ----------------------------- Returned Card (MATCH CART SCALE) ----------------------------- */
+
+class _ReturnedCard extends StatelessWidget {
+  const _ReturnedCard({
+    required this.record,
+    required this.compact,
+    required this.tokens,
+    required this.shadow,
+    required this.textTheme,
+    required this.emojiBase,
+    required this.faded,
+    required this.crossline,
+  });
+
+  final ReturnedRecord record;
+  final bool compact;
+  final AppTokens tokens;
+  final List<BoxShadow> shadow;
+  final TextTheme textTheme;
+  final TextStyle emojiBase;
+  final bool faded;
+  final bool crossline;
+
+  @override
+  Widget build(BuildContext context) {
+    final tile = compact ? 42.0 : 48.0;
+    final emojiSize = compact ? 22.0 : 26.0;
+
+    final item = record.item;
+
+    final base = Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(tokens.radiusXl),
+        boxShadow: shadow,
+      ),
+      padding: EdgeInsets.all(compact ? 10 : 12),
+      child: Column(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: tile,
+                height: tile,
+                decoration: BoxDecoration(
+                  color: AppColors.background,
+                  borderRadius: BorderRadius.circular(tokens.radiusLg),
+                  border: Border.all(color: AppColors.outline),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  item.emoji,
+                  style: emojiBase.copyWith(fontSize: emojiSize),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.titleMedium?.copyWith(
+                          fontSize: compact ? 15 : 16,
+                          height: 1.15,
+                          color: AppColors.muted,
+                          decoration: crossline
+                              ? TextDecoration.lineThrough
+                              : TextDecoration.none,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${item.bucketName} | ${item.bucketId}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: AppColors.muted.withValues(alpha: 0.85),
+                          fontWeight: FontWeight.w700,
+                          fontSize: compact ? 11.5 : 12,
+                          height: 1.1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _StatusPill(compact: compact),
+            ],
+          ),
+          SizedBox(height: compact ? 10 : 12),
+          _ReturnedQtyBar(
+            returned: item.quantity,
+            max: item.maxQuantity,
+            compact: compact,
+          ),
+        ],
+      ),
+    );
+
+    return faded ? Opacity(opacity: 0.45, child: base) : base;
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.compact});
+
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<AppTokens>()!;
+    final box = compact ? 34.0 : 38.0;
+    final iconSize = compact ? 18.0 : 20.0;
+
+    return Container(
+      width: box,
+      height: box,
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(tokens.radiusLg),
+        border: Border.all(color: AppColors.outline),
+      ),
+      alignment: Alignment.center,
+      child: Icon(Icons.check_rounded, size: iconSize, color: AppColors.muted),
+    );
+  }
+}
+
+/* ----------------------------- Return Stepper (tap + hold) ----------------------------- */
+
+class _ReturnQtyStepperHold extends StatelessWidget {
+  const _ReturnQtyStepperHold({
     required this.value,
     required this.max,
     required this.compact,
-    required this.onMinus,
-    required this.onPlus,
+    required this.onChanged,
   });
 
   final int value;
   final int max;
   final bool compact;
-  final VoidCallback onMinus;
-  final VoidCallback onPlus;
+  final ValueChanged<int> onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -658,9 +850,14 @@ class _ReturnQtyStepperBig extends StatelessWidget {
     final canMinus = value > 0;
     final canPlus = value < max;
 
-    final height = compact ? 56.0 : 62.0;
-    final btnSize = compact ? 46.0 : 50.0;
-    final iconSize = compact ? 22.0 : 24.0;
+    // identical to CartPage stepper sizing
+    final height = compact ? 50.0 : 56.0;
+    final btnSize = compact ? 40.0 : 44.0;
+    final iconSize = compact ? 20.0 : 22.0;
+
+    final disabledFg = AppColors.muted.withValues(alpha: 0.45);
+
+    int clampNext(int next) => next.clamp(0, max);
 
     return Container(
       height: height,
@@ -672,13 +869,25 @@ class _ReturnQtyStepperBig extends StatelessWidget {
       child: Row(
         children: [
           const SizedBox(width: 6),
-          _StepIconButton(
-            icon: Icons.remove_rounded,
-            size: btnSize,
-            iconSize: iconSize,
+
+          // MINUS (tap + hold)
+          HoldIconButton(
             enabled: canMinus,
-            onTap: canMinus ? onMinus : null,
+            maxCount: max,
+            icon: Icons.remove_rounded,
+            iconColor: canMinus ? AppColors.primary : disabledFg,
+            fill: AppColors.background,
+            border: Colors.transparent,
+            width: btnSize,
+            height: btnSize,
+            iconSize: iconSize,
+            radius: tokens.radiusLg,
+            onTap: canMinus ? () => onChanged(clampNext(value - 1)) : null,
+            onHoldTick: canMinus
+                ? (step) => onChanged(clampNext(value - step))
+                : null,
           ),
+
           const SizedBox(width: 6),
           Expanded(
             child: Center(
@@ -687,8 +896,10 @@ class _ReturnQtyStepperBig extends StatelessWidget {
                 children: [
                   Text(
                     '$value',
-                    style: (compact ? t.headlineSmall : t.headlineMedium)
-                        ?.copyWith(fontWeight: FontWeight.w900, height: 1),
+                    style: (compact ? t.titleLarge : t.headlineSmall)?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      height: 1,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -704,13 +915,25 @@ class _ReturnQtyStepperBig extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
-          _StepIconButton(
-            icon: Icons.add_rounded,
-            size: btnSize,
-            iconSize: iconSize,
+
+          // PLUS (tap + hold)
+          HoldIconButton(
             enabled: canPlus,
-            onTap: canPlus ? onPlus : null,
+            maxCount: max,
+            icon: Icons.add_rounded,
+            iconColor: canPlus ? AppColors.primary : disabledFg,
+            fill: AppColors.background,
+            border: Colors.transparent,
+            width: btnSize,
+            height: btnSize,
+            iconSize: iconSize,
+            radius: tokens.radiusLg,
+            onTap: canPlus ? () => onChanged(clampNext(value + 1)) : null,
+            onHoldTick: canPlus
+                ? (step) => onChanged(clampNext(value + step))
+                : null,
           ),
+
           const SizedBox(width: 6),
         ],
       ),
@@ -718,163 +941,54 @@ class _ReturnQtyStepperBig extends StatelessWidget {
   }
 }
 
-class _StepIconButton extends StatelessWidget {
-  const _StepIconButton({
-    required this.icon,
-    required this.size,
-    required this.iconSize,
-    required this.enabled,
-    required this.onTap,
+class _ReturnedQtyBar extends StatelessWidget {
+  const _ReturnedQtyBar({
+    required this.returned,
+    required this.max,
+    required this.compact,
   });
 
-  final IconData icon;
-  final double size;
-  final double iconSize;
-  final bool enabled;
-  final VoidCallback? onTap;
+  final int returned;
+  final int max;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
-    final fg = enabled
-        ? AppColors.primary
-        : AppColors.muted.withValues(alpha: 0.45);
-
-    return Semantics(
-      button: true,
-      enabled: enabled,
-      child: InkResponse(
-        onTap: onTap,
-        radius: 28,
-        child: Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            color: AppColors.background,
-            borderRadius: BorderRadius.circular(tokens.radiusLg),
-          ),
-          alignment: Alignment.center,
-          child: Icon(icon, size: iconSize, color: fg),
-        ),
-      ),
-    );
-  }
-}
-
-/* ----------------------------- Returned Card ----------------------------- */
-
-class _ReturnedCard extends StatelessWidget {
-  const _ReturnedCard({
-    required this.record,
-    required this.tokens,
-    required this.compact,
-    required this.shadow,
-    required this.emojiBase,
-    required this.faded,
-    required this.crossline,
-  });
-
-  final ReturnedRecord record;
-  final AppTokens tokens;
-  final bool compact;
-  final List<BoxShadow> shadow;
-  final TextStyle emojiBase;
-  final bool faded;
-  final bool crossline;
-
-  @override
-  Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
 
-    final tile = compact ? 48.0 : 54.0;
-    final emojiSize = compact ? 24.0 : 28.0;
+    final height = compact ? 50.0 : 56.0;
 
-    final item = record.item;
-    final bg = _emojiBgFor(item.id);
-
-    final base = Container(
+    return Container(
+      height: height,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(tokens.radiusXl),
-        boxShadow: shadow,
+        borderRadius: BorderRadius.circular(tokens.radiusLg),
+        border: Border.all(color: AppColors.outline),
       ),
-      padding: EdgeInsets.all(compact ? 12 : 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: tile,
-            height: tile,
-            decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(tokens.radiusLg),
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              item.emoji,
-              style: emojiBase.copyWith(fontSize: emojiSize),
+          Text(
+            '$returned',
+            style: (compact ? t.titleLarge : t.headlineSmall)?.copyWith(
+              fontWeight: FontWeight.w900,
+              height: 1,
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.titleMedium?.copyWith(
-                      fontSize: compact ? 16 : 18,
-                      color: AppColors.muted,
-                      decoration: crossline
-                          ? TextDecoration.lineThrough
-                          : TextDecoration.none,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Bucket: ${item.bucketName} • ${item.bucketId}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.bodyMedium?.copyWith(
-                      color: AppColors.muted.withValues(alpha: 0.85),
-                      fontWeight: FontWeight.w700,
-                      fontSize: compact ? 12 : 13,
-                    ),
-                  ),
-                ],
-              ),
+          const SizedBox(height: 2),
+          Text(
+            'of $max returned',
+            style: t.bodySmall?.copyWith(
+              color: AppColors.muted,
+              fontWeight: FontWeight.w700,
+              height: 1,
             ),
-          ),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                "Returned",
-                style: t.bodyMedium?.copyWith(
-                  color: AppColors.muted,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                "${item.quantity} / ${item.maxQuantity}",
-                style: t.bodySmall?.copyWith(
-                  color: AppColors.muted,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
           ),
         ],
       ),
     );
-
-    return faded ? Opacity(opacity: 0.45, child: base) : base;
   }
 }
 
@@ -928,18 +1042,6 @@ class _EmptyMeState extends StatelessWidget {
 }
 
 /* ----------------------------- Helpers ----------------------------- */
-
-Color _emojiBgFor(String seed) {
-  const palette = <Color>[
-    Color(0xFFEAF2FF),
-    Color(0xFFFFF4E5),
-    Color(0xFFEFFAF3),
-    Color(0xFFFFE8EE),
-    Color(0xFFEDE7FF),
-  ];
-  final hash = seed.codeUnits.fold<int>(0, (a, b) => a + b);
-  return palette[hash % palette.length];
-}
 
 String _initials(String name) {
   final parts = name

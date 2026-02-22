@@ -6,6 +6,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:scout_stock/presentation/pages/bucket_mixed_items_page.dart';
 import 'package:scout_stock/presentation/pages/bucket_single_item_page.dart';
 
 import '../../theme/app_theme.dart';
@@ -278,25 +279,25 @@ class _ScanPageState extends State<ScanPage>
       setState(() => _lastBucketLabel = label);
     }
 
-    // ✅ Navigate to bucket page when this code is scanned
-    if (raw == 'ABC-ABC-123' && !_navigating) {
+    final page = _demoPageForRaw(raw);
+    if (page != null && !_navigating) {
       _navigating = true;
 
-      // Stop camera while inside the bucket page (privacy + performance)
+      // Stop camera while inside the bucket page
       _enqueueCamera(_deactivateScanner);
 
-      Navigator.of(context)
-          .push(MaterialPageRoute(builder: (_) => BucketItemPage(barcode: raw)))
-          .then((_) {
-            if (!mounted) return;
-            _navigating = false;
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => page)).then((
+        _,
+      ) {
+        if (!mounted) return;
+        _navigating = false;
 
-            // Resume scanning when returning
-            if (_isActive) {
-              _resetFadeState();
-              _enqueueCamera(_activateScanner);
-            }
-          });
+        // Resume scanning when returning
+        if (_isActive) {
+          _resetFadeState();
+          _enqueueCamera(_activateScanner);
+        }
+      });
     }
   }
 
@@ -328,8 +329,8 @@ class _ScanPageState extends State<ScanPage>
     final raw = _lastRaw;
     if (raw == null || raw.isEmpty) return;
 
-    // Only open the single-item page for the demo code
-    if (raw != 'ABC-ABC-123') return;
+    final page = _demoPageForRaw(raw);
+    if (page == null) return;
 
     if (_navigating) return;
     _navigating = true;
@@ -337,9 +338,7 @@ class _ScanPageState extends State<ScanPage>
     // Stop camera while inside the bucket page
     _enqueueCamera(_deactivateScanner);
 
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => BucketItemPage(barcode: raw)));
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
 
     if (!mounted) return;
     _navigating = false;
@@ -351,8 +350,66 @@ class _ScanPageState extends State<ScanPage>
     }
   }
 
+  Widget? _demoPageForRaw(String raw) {
+    if (raw == 'ABC-ABC-123') {
+      return BucketItemPage(barcode: raw);
+    }
+
+    if (raw == 'AAA-AAA-111') {
+      return BucketMixedItemsPage(
+        bucketId: raw,
+        bucketName: 'Bucket 1',
+        items: _mockMixedBucketItems(),
+      );
+    }
+
+    return null;
+  }
+
+  List<BucketCatalogItem> _mockMixedBucketItems() {
+    return const [
+      BucketCatalogItem(
+        id: 'ITM-HDS-0001',
+        name: 'Heavy Duty Stakes',
+        emoji: '📌',
+        available: 12,
+      ),
+      BucketCatalogItem(
+        id: 'ITM-NRP-0002',
+        name: 'Nylon Rope (10m)',
+        emoji: '🪢',
+        available: 5,
+      ),
+      BucketCatalogItem(
+        id: 'ITM-LED-0003',
+        name: 'LED Lantern',
+        emoji: '🔦',
+        available: 0,
+      ),
+      BucketCatalogItem(
+        id: 'ITM-FAK-0004',
+        name: 'First Aid Kit',
+        emoji: '🧰',
+        available: 3,
+      ),
+      BucketCatalogItem(
+        id: 'ITM-RML-0005',
+        name: 'Rubber Mallet',
+        emoji: '🔨',
+        available: 2,
+      ),
+      BucketCatalogItem(
+        id: 'ITM-AAB-0006',
+        name: 'AA Batteries',
+        emoji: '🔋',
+        available: 8,
+      ),
+    ];
+  }
+
   Future<bool> _openBucketIfDemo(String raw) async {
-    if (raw != 'ABC-ABC-123') return false;
+    final page = _demoPageForRaw(raw);
+    if (page == null) return false;
     if (_navigating) return true;
 
     _navigating = true;
@@ -360,9 +417,7 @@ class _ScanPageState extends State<ScanPage>
     // Stop camera while inside the bucket page
     _enqueueCamera(_deactivateScanner);
 
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => BucketItemPage(barcode: raw)));
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
 
     if (!mounted) return true;
     _navigating = false;

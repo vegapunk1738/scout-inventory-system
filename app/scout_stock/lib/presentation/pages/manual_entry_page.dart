@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
 
 import '../../theme/app_theme.dart';
@@ -79,44 +80,49 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
         title: Text('Back to Scanner', style: textTheme.titleMedium),
         centerTitle: false,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 28, 24, 140),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Manual Entry', style: textTheme.displaySmall),
-            const SizedBox(height: 12),
-            Text(
-              'Enter the ID directly if the barcode is\ndamaged or unreadable.',
-              style: textTheme.bodyLarge?.copyWith(color: AppColors.muted),
-            ),
-            const SizedBox(height: 34),
-            Text(
-              'ENTER BUCKET CODE',
-              style: textTheme.labelMedium?.copyWith(color: AppColors.ink),
-            ),
-            const SizedBox(height: 12),
+      body: Stack(
+        children: [
+          const Positioned.fill(child: DottedBackground()),
+          SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 140),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Manual Entry', style: textTheme.displaySmall),
+                const SizedBox(height: 12),
+                Text(
+                  'Enter the ID directly if the barcode is\ndamaged or unreadable.',
+                  style: textTheme.bodyLarge?.copyWith(color: AppColors.muted),
+                ),
+                const SizedBox(height: 34),
+                Text(
+                  'ENTER BUCKET CODE',
+                  style: textTheme.labelMedium?.copyWith(color: AppColors.ink),
+                ),
+                const SizedBox(height: 12),
 
-            AttentionTextField(
-              key: _fieldKey,
-              controller: _controller,
-              focusNode: _focusNode,
-              autofocus: true,
-              hintText: 'e.g. XXXX-XXXX-1111',
-              onSubmitted: (_) => _openBucket(),
-              // optional overrides:
-              // allowPattern: r'[A-Za-z0-9-]',
-              // maxLength: 32,
-              // uppercase: true,
-            ),
+                AttentionTextField(
+                  key: _fieldKey,
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  autofocus: true,
+                  hintText: 'e.g. XXXX-XXXX-1111',
+                  onSubmitted: (_) => _openBucket(),
+                  // optional overrides:
+                  // allowPattern: r'[A-Za-z0-9-]',
+                  // maxLength: 32,
+                  // uppercase: true,
+                ),
 
-            const SizedBox(height: 16),
-            Text(
-              'Tip: Use the keypad below to enter numbers.',
-              style: textTheme.bodyMedium?.copyWith(color: AppColors.muted),
+                const SizedBox(height: 16),
+                Text(
+                  'Tip: Use the keypad below to enter numbers.',
+                  style: textTheme.bodyMedium?.copyWith(color: AppColors.muted),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
 
       bottomNavigationBar: GlowingActionButton(
