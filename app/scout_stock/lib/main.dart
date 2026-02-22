@@ -55,9 +55,7 @@ class _AppLoadingScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(child: CircularProgressIndicator()),
-    );
+    return const Scaffold(body: Center(child: CircularProgressIndicator()));
   }
 }
 
@@ -67,9 +65,7 @@ class _AppErrorScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(child: Text('Failed to load user:\n$error')),
-    );
+    return Scaffold(body: Center(child: Text('Failed to load user:\n$error')));
   }
 }
 

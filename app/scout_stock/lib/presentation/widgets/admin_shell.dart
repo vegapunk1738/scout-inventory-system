@@ -47,7 +47,7 @@ class _AdminShellState extends State<AdminShell> {
           valueListenable: _index,
           builder: (_, i, _) => _AdminBottomNav(
             index: i,
-            onTap: (next) => _index.value = next,
+            onTap: (next) => _index.value = next, 
           ),
         ),
       ),
