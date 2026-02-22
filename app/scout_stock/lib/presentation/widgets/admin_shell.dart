@@ -11,7 +11,6 @@ class AdminShell extends StatefulWidget {
   State<AdminShell> createState() => _AdminShellState();
 }
 
-/// Lets any page know which bottom-nav tab is active.
 class AdminShellScope extends InheritedNotifier<ValueNotifier<int>> {
   const AdminShellScope({
     super.key,
@@ -20,12 +19,16 @@ class AdminShellScope extends InheritedNotifier<ValueNotifier<int>> {
   }) : super(notifier: indexListenable);
 
   static ValueNotifier<int>? maybeOf(BuildContext context) {
-    return context.dependOnInheritedWidgetOfExactType<AdminShellScope>()?.notifier;
+    return context
+        .dependOnInheritedWidgetOfExactType<AdminShellScope>()
+        ?.notifier;
   }
 }
 
 class _AdminShellState extends State<AdminShell> {
-  late final ValueNotifier<int> _index = ValueNotifier<int>(widget.initialIndex);
+  late final ValueNotifier<int> _index = ValueNotifier<int>(
+    widget.initialIndex,
+  );
 
   @override
   void dispose() {
@@ -38,24 +41,21 @@ class _AdminShellState extends State<AdminShell> {
     return AdminShellScope(
       indexListenable: _index,
       child: Scaffold(
-        extendBody: true, // lets camera show behind glass nav
+        extendBody: true,
         body: ValueListenableBuilder<int>(
           valueListenable: _index,
           builder: (_, i, _) => IndexedStack(index: i, children: widget.pages),
         ),
         bottomNavigationBar: ValueListenableBuilder<int>(
           valueListenable: _index,
-          builder: (_, i, _) => _AdminBottomNav(
-            index: i,
-            onTap: (next) => _index.value = next, 
-          ),
+          builder: (_, i, _) =>
+              _AdminBottomNav(index: i, onTap: (next) => _index.value = next),
         ),
       ),
     );
   }
 }
 
-/* ----------------------------- NAV ----------------------------- */
 class _AdminBottomNav extends StatelessWidget {
   const _AdminBottomNav({required this.index, required this.onTap});
 
@@ -64,7 +64,7 @@ class _AdminBottomNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final transparent = index == 0; // only Scan
+    final transparent = index == 0;
 
     return SafeArea(
       top: false,
@@ -78,10 +78,7 @@ class _AdminBottomNav extends StatelessWidget {
           layoutBuilder: (currentChild, previousChildren) {
             return Stack(
               alignment: Alignment.bottomCenter,
-              children: <Widget>[
-                ...previousChildren,
-                ?currentChild,
-              ],
+              children: <Widget>[...previousChildren, ?currentChild],
             );
           },
           transitionBuilder: (child, animation) {
@@ -227,7 +224,6 @@ class _GlassNav extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(tokens.radiusXl),
       child: BackdropFilter(
-        // Lower blur = much cheaper, still looks “glass”.
         filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
         child: Container(
           height: 78,

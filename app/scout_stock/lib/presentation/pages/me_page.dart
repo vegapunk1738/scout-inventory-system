@@ -29,7 +29,6 @@ class MePage extends ConsumerWidget {
     final safeBottom = MediaQuery.of(context).padding.bottom;
     final compact = MediaQuery.sizeOf(context).width < 380;
 
-    // Match CartPage shadow
     final shadow = tokens.cardShadow.isNotEmpty
         ? [
             tokens.cardShadow.first.copyWith(
@@ -39,7 +38,6 @@ class MePage extends ConsumerWidget {
           ]
         : const <BoxShadow>[];
 
-    // Bottom button sizing identical to CartPage
     final btnHeight = compact ? 62.0 : 66.0;
     final btnPadding = EdgeInsets.fromLTRB(
       compact ? 14 : 16,
@@ -51,7 +49,6 @@ class MePage extends ConsumerWidget {
     final bottomBarFootprint = btnHeight + btnPadding.vertical + safeBottom;
     final listBottomSpacer = bottomBarFootprint + 12;
 
-    // User-derived header info (global user)
     final displayName = userAsync.maybeWhen(
       data: (u) => u.name,
       orElse: () => 'Loading…',
@@ -64,7 +61,6 @@ class MePage extends ConsumerWidget {
 
     final initials = _initials(displayName);
 
-    // Build rows (headers + borrowed + returned)
     final rows = _buildRows(
       mode: me.mode,
       borrowed: me.borrowed,
@@ -126,7 +122,6 @@ class MePage extends ConsumerWidget {
 
     final emojiBase = GoogleFonts.notoColorEmoji(height: 1);
 
-    // List padding identical to CartPage
     final listSide = compact ? 12.0 : 14.0;
 
     return Scaffold(
@@ -235,7 +230,6 @@ class MePage extends ConsumerWidget {
                     ),
                   ),
 
-                // Spacer so last item can scroll fully above the fixed button
                 SliverToBoxAdapter(
                   child: SizedBox(
                     height: showBottomReturn ? listBottomSpacer : 22,
@@ -245,7 +239,6 @@ class MePage extends ConsumerWidget {
             ),
           ),
 
-          // Soft scrim behind the fixed bottom button (same idea as CartPage)
           if (showBottomReturn)
             Positioned(
               left: 0,
@@ -278,8 +271,8 @@ class MePage extends ConsumerWidget {
                 icon: const Icon(Icons.keyboard_return_rounded),
                 loading: me.submitting,
                 onPressed: me.submitting ? null : onReturn,
-                padding: btnPadding, // identical to CartPage
-                height: btnHeight, // identical to CartPage
+                padding: btnPadding,
+                height: btnHeight,
               ),
             ),
         ],
@@ -287,8 +280,6 @@ class MePage extends ConsumerWidget {
     );
   }
 }
-
-/* ----------------------------- Header ----------------------------- */
 
 class _MeHeader extends StatelessWidget {
   const _MeHeader({
@@ -362,8 +353,6 @@ class _MeHeader extends StatelessWidget {
     );
   }
 }
-
-/* ----------------------------- Filter Pills ----------------------------- */
 
 class _BorrowReturnPills extends StatelessWidget {
   const _BorrowReturnPills({
@@ -469,8 +458,6 @@ class _Pill extends StatelessWidget {
     );
   }
 }
-
-/* ----------------------------- Rows ----------------------------- */
 
 enum _MeRowKind { header, borrowed, returned }
 
@@ -589,8 +576,6 @@ class _DateHeader extends StatelessWidget {
   }
 }
 
-/* ----------------------------- Borrowed Card (MATCH CART SCALE) ----------------------------- */
-
 class _BorrowedCard extends StatelessWidget {
   const _BorrowedCard({
     required this.record,
@@ -679,7 +664,6 @@ class _BorrowedCard extends StatelessWidget {
           ),
           SizedBox(height: compact ? 10 : 12),
 
-          // ✅ tap + hold accelerator
           _ReturnQtyStepperHold(
             value: item.quantity,
             max: item.maxQuantity,
@@ -691,8 +675,6 @@ class _BorrowedCard extends StatelessWidget {
     );
   }
 }
-
-/* ----------------------------- Returned Card (MATCH CART SCALE) ----------------------------- */
 
 class _ReturnedCard extends StatelessWidget {
   const _ReturnedCard({
@@ -827,8 +809,6 @@ class _StatusPill extends StatelessWidget {
   }
 }
 
-/* ----------------------------- Return Stepper (tap + hold) ----------------------------- */
-
 class _ReturnQtyStepperHold extends StatelessWidget {
   const _ReturnQtyStepperHold({
     required this.value,
@@ -850,7 +830,6 @@ class _ReturnQtyStepperHold extends StatelessWidget {
     final canMinus = value > 0;
     final canPlus = value < max;
 
-    // identical to CartPage stepper sizing
     final height = compact ? 50.0 : 56.0;
     final btnSize = compact ? 40.0 : 44.0;
     final iconSize = compact ? 20.0 : 22.0;
@@ -870,7 +849,6 @@ class _ReturnQtyStepperHold extends StatelessWidget {
         children: [
           const SizedBox(width: 6),
 
-          // MINUS (tap + hold)
           HoldIconButton(
             enabled: canMinus,
             maxCount: max,
@@ -916,7 +894,6 @@ class _ReturnQtyStepperHold extends StatelessWidget {
           ),
           const SizedBox(width: 6),
 
-          // PLUS (tap + hold)
           HoldIconButton(
             enabled: canPlus,
             maxCount: max,
@@ -992,8 +969,6 @@ class _ReturnedQtyBar extends StatelessWidget {
   }
 }
 
-/* ----------------------------- Empty ----------------------------- */
-
 class _EmptyMeState extends StatelessWidget {
   const _EmptyMeState({required this.title, required this.subtitle});
   final String title;
@@ -1040,8 +1015,6 @@ class _EmptyMeState extends StatelessWidget {
     );
   }
 }
-
-/* ----------------------------- Helpers ----------------------------- */
 
 String _initials(String name) {
   final parts = name

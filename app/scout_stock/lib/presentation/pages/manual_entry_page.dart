@@ -22,7 +22,6 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
   void initState() {
     super.initState();
 
-    // Focus immediately (green outline).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
     });
@@ -36,10 +35,8 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
   }
 
   bool _mockBucketExists(String code) {
-    // Format: letters/numbers with optional dash groups (no leading/trailing dash)
     final okFormat = RegExp(r'^[A-Z0-9]+(?:-[A-Z0-9]+)*$').hasMatch(code);
 
-    // Mock rule: treat codes ending with "-0000" as "not found"
     final notFound = code.endsWith('-0000');
 
     return okFormat && code.length >= 4 && !notFound;
@@ -108,10 +105,6 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
                   autofocus: true,
                   hintText: 'e.g. XXXX-XXXX-1111',
                   onSubmitted: (_) => _openBucket(),
-                  // optional overrides:
-                  // allowPattern: r'[A-Za-z0-9-]',
-                  // maxLength: 32,
-                  // uppercase: true,
                 ),
 
                 const SizedBox(height: 16),
@@ -129,7 +122,7 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
         label: 'Open Bucket',
         icon: const Icon(Icons.search),
         onPressed: _openBucket,
-        respectKeyboardInset: true, // keeps the nice lift when keyboard opens
+        respectKeyboardInset: true, 
       ),
     );
   }

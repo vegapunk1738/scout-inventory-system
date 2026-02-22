@@ -11,18 +11,18 @@ class AttentionTextField extends StatefulWidget {
     this.onSubmitted,
     this.onChanged,
 
-    // Input rules
     this.allowPattern = r'[A-Za-z0-9-]',
     this.uppercase = true,
     this.maxLength = 32,
 
-    // Layout / styling
     this.sideSpacerWidth = 56,
-    this.contentPadding = const EdgeInsets.symmetric(horizontal: 12, vertical: 26),
+    this.contentPadding = const EdgeInsets.symmetric(
+      horizontal: 12,
+      vertical: 26,
+    ),
     this.textStyle,
     this.hintStyle,
 
-    // Error behavior
     this.clearErrorOnChange = true,
     this.hapticsOnError = true,
     this.shakeDistance = 10,
@@ -37,12 +37,10 @@ class AttentionTextField extends StatefulWidget {
   final ValueChanged<String>? onSubmitted;
   final ValueChanged<String>? onChanged;
 
-  /// Allowed characters (single-char allow filter).
   final String allowPattern;
   final bool uppercase;
   final int maxLength;
 
-  /// Used to keep text visually centered even if you add icons later.
   final double sideSpacerWidth;
 
   final EdgeInsets contentPadding;
@@ -72,17 +70,55 @@ class AttentionTextFieldState extends State<AttentionTextField>
   void initState() {
     super.initState();
 
-    _shakeController = AnimationController(vsync: this, duration: widget.shakeDuration);
+    _shakeController = AnimationController(
+      vsync: this,
+      duration: widget.shakeDuration,
+    );
 
-    _shakeX = TweenSequence<double>([
-      TweenSequenceItem(tween: Tween(begin: 0, end: -widget.shakeDistance), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: -widget.shakeDistance, end: widget.shakeDistance), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: widget.shakeDistance, end: -widget.shakeDistance * 0.8), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: -widget.shakeDistance * 0.8, end: widget.shakeDistance * 0.8), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: widget.shakeDistance * 0.8, end: -widget.shakeDistance * 0.4), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: -widget.shakeDistance * 0.4, end: widget.shakeDistance * 0.4), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: widget.shakeDistance * 0.4, end: 0), weight: 1),
-    ]).animate(CurvedAnimation(parent: _shakeController, curve: Curves.easeOut));
+    _shakeX = TweenSequence<double>(
+      [
+        TweenSequenceItem(
+          tween: Tween(begin: 0, end: -widget.shakeDistance),
+          weight: 1,
+        ),
+        TweenSequenceItem(
+          tween: Tween(begin: -widget.shakeDistance, end: widget.shakeDistance),
+          weight: 1,
+        ),
+        TweenSequenceItem(
+          tween: Tween(
+            begin: widget.shakeDistance,
+            end: -widget.shakeDistance * 0.8,
+          ),
+          weight: 1,
+        ),
+        TweenSequenceItem(
+          tween: Tween(
+            begin: -widget.shakeDistance * 0.8,
+            end: widget.shakeDistance * 0.8,
+          ),
+          weight: 1,
+        ),
+        TweenSequenceItem(
+          tween: Tween(
+            begin: widget.shakeDistance * 0.8,
+            end: -widget.shakeDistance * 0.4,
+          ),
+          weight: 1,
+        ),
+        TweenSequenceItem(
+          tween: Tween(
+            begin: -widget.shakeDistance * 0.4,
+            end: widget.shakeDistance * 0.4,
+          ),
+          weight: 1,
+        ),
+        TweenSequenceItem(
+          tween: Tween(begin: widget.shakeDistance * 0.4, end: 0),
+          weight: 1,
+        ),
+      ],
+    ).animate(CurvedAnimation(parent: _shakeController, curve: Curves.easeOut));
 
     if (widget.clearErrorOnChange) {
       widget.controller.addListener(_handleControllerChanged);
@@ -158,10 +194,8 @@ class AttentionTextFieldState extends State<AttentionTextField>
 
     return AnimatedBuilder(
       animation: _shakeController,
-      builder: (context, child) => Transform.translate(
-        offset: Offset(_shakeX.value, 0),
-        child: child,
-      ),
+      builder: (context, child) =>
+          Transform.translate(offset: Offset(_shakeX.value, 0), child: child),
       child: TextField(
         controller: widget.controller,
         focusNode: widget.focusNode,
@@ -184,15 +218,17 @@ class AttentionTextFieldState extends State<AttentionTextField>
           hintText: widget.hintText,
           hintStyle: effectiveHintStyle,
 
-          // Force red border via theme errorBorder, without showing message space.
           errorText: _hasError ? ' ' : null,
           errorStyle: const TextStyle(fontSize: 0, height: 0),
 
-          // Keep visual center
           prefixIcon: SizedBox(width: widget.sideSpacerWidth),
-          prefixIconConstraints: BoxConstraints(minWidth: widget.sideSpacerWidth),
+          prefixIconConstraints: BoxConstraints(
+            minWidth: widget.sideSpacerWidth,
+          ),
           suffixIcon: SizedBox(width: widget.sideSpacerWidth),
-          suffixIconConstraints: BoxConstraints(minWidth: widget.sideSpacerWidth),
+          suffixIconConstraints: BoxConstraints(
+            minWidth: widget.sideSpacerWidth,
+          ),
 
           isDense: false,
           contentPadding: widget.contentPadding,

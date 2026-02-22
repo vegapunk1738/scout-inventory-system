@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 
-/// Core button: NO SafeArea, NO outer padding.
-/// Use this inside dialogs/cards/forms.
 class GlowingFilledButton extends StatelessWidget {
   const GlowingFilledButton({
     super.key,
@@ -24,13 +22,11 @@ class GlowingFilledButton extends StatelessWidget {
   final bool loading;
   final double height;
 
-  /// If null, defaults to tokens.radiusXl
   final double? radius;
 
   final Color? backgroundColor;
   final Color? foregroundColor;
 
-  /// If null, defaults to tokens.glowShadow when enabled.
   final List<BoxShadow>? glowShadows;
 
   @override
@@ -71,8 +67,6 @@ class GlowingFilledButton extends StatelessWidget {
   }
 }
 
-/// Bottom-bar wrapper: SafeArea + AnimatedPadding.
-/// Use this for Manual Entry / Cart pages.
 class GlowingActionButton extends StatelessWidget {
   const GlowingActionButton({
     super.key,

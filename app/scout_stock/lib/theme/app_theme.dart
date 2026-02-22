@@ -3,8 +3,6 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Design tokens that are NOT part of Material's ColorScheme.
-/// Access via: Theme.of(context).extension<AppTokens>()!
 @immutable
 class AppTokens extends ThemeExtension<AppTokens> {
   const AppTokens({
@@ -17,10 +15,8 @@ class AppTokens extends ThemeExtension<AppTokens> {
   final double radiusLg;
   final double radiusXl;
 
-  /// Soft neutral shadow used for cards/sheets.
   final List<BoxShadow> cardShadow;
 
-  /// Green glow used only on primary “hero” actions.
   final List<BoxShadow> glowShadow;
 
   @override
@@ -57,7 +53,6 @@ class AppColors {
 
   static const outline = Color(0xFFE4E7EC);
 
-  /// App background (off-white)
   static const background = Color(0xFFF7F8FA);
 
   static const successBg = Color(0xFFE7F6EC);
@@ -71,7 +66,6 @@ class AppTheme {
   static ThemeData light() {
     final base = ThemeData(useMaterial3: true, brightness: Brightness.light);
 
-    // Start from a seed scheme, then normalize to your palette.
     final scheme =
         ColorScheme.fromSeed(
           seedColor: AppColors.primary,
@@ -84,13 +78,12 @@ class AppTheme {
           outline: AppColors.outline,
           secondary: AppColors.primary,
           onSecondary: AppColors.onPrimary,
-          // Background is what your screens look like.
+
           surfaceContainerLowest: AppColors.background,
           surfaceContainerLow: AppColors.background,
           surfaceContainer: AppColors.background,
         );
 
-    // Typography: softer than Inter, matches your screenshots closely.
     final baseText = GoogleFonts.plusJakartaSansTextTheme(base.textTheme);
 
     final textTheme = baseText
@@ -126,7 +119,7 @@ class AppTheme {
             fontSize: 14,
             height: 1.5,
             fontWeight: FontWeight.w500,
-            color: AppColors.muted, // muted body text default
+            color: AppColors.muted,
           ),
           labelLarge: GoogleFonts.plusJakartaSans(
             fontSize: 18,
@@ -149,7 +142,7 @@ class AppTheme {
         BoxShadow(
           blurRadius: 18,
           offset: Offset(0, 10),
-          color: Color(0x14000000), // ~8% black
+          color: Color(0x14000000),
         ),
       ],
       glowShadow: [
@@ -157,7 +150,7 @@ class AppTheme {
           blurRadius: 28,
           spreadRadius: 2,
           offset: Offset(0, 10),
-          color: Color(0x660E7A2C), // green glow (~40%)
+          color: Color(0x660E7A2C),
         ),
       ],
     );
@@ -172,7 +165,6 @@ class AppTheme {
       textTheme: textTheme,
       extensions: const [tokens],
 
-      // Top app bars
       appBarTheme: AppBarTheme(
         backgroundColor: AppColors.background,
         foregroundColor: AppColors.ink,
@@ -182,16 +174,14 @@ class AppTheme {
         iconTheme: const IconThemeData(color: AppColors.ink),
       ),
 
-      // Icons
       iconTheme: const IconThemeData(color: AppColors.ink),
 
-      // Cards & sheets (your UI is card-heavy)
       cardTheme: CardThemeData(
         color: Colors.white,
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: roundedXl,
-        surfaceTintColor: Colors.transparent, // avoid M3 tint
+        surfaceTintColor: Colors.transparent,
       ),
 
       dialogTheme: DialogThemeData(
@@ -210,7 +200,6 @@ class AppTheme {
         dragHandleColor: AppColors.outline,
       ),
 
-      // Inputs (search bars + forms + manual entry)
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.white,
@@ -242,7 +231,6 @@ class AppTheme {
         ),
       ),
 
-      // Buttons (base style; glow is a wrapper widget, not global)
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: AppColors.primary,
@@ -273,7 +261,6 @@ class AppTheme {
         ),
       ),
 
-      // Chips / badges (Admin/Scout tags, status pills)
       chipTheme: ChipThemeData(
         backgroundColor: AppColors.background,
         selectedColor: AppColors.successBg,
@@ -284,7 +271,6 @@ class AppTheme {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
       ),
 
-      // List tiles (activity rows, settings rows)
       listTileTheme: ListTileThemeData(
         iconColor: AppColors.muted,
         titleTextStyle: textTheme.titleMedium,
@@ -292,7 +278,6 @@ class AppTheme {
         contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
       ),
 
-      // Navigation (you may use BottomNavigationBar now, but this also supports M3 NavigationBar)
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: Colors.white,
         selectedItemColor: AppColors.primary,
@@ -313,7 +298,6 @@ class AppTheme {
         }),
       ),
 
-      // FAB (center “+”)
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
@@ -326,7 +310,6 @@ class AppTheme {
         space: 1,
       ),
 
-      // Cursor/selection (important for your big input fields)
       textSelectionTheme: TextSelectionThemeData(
         cursorColor: AppColors.ink,
         selectionColor: AppColors.primary.withValues(alpha: 0.18),

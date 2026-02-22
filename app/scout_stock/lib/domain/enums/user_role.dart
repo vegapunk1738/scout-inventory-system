@@ -14,5 +14,5 @@ enum UserRole {
     }
   }
 
-  String toJson() => name; // "scout" | "admin"
+  String toJson() => name;
 }

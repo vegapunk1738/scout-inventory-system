@@ -9,12 +9,10 @@ class Item {
     required this.emoji,
   });
 
-  /// Example: "SSI-PTI-001"
   final String id;
 
   final String name;
 
-  /// Example: "SSB-TSB-001"
   final String bucketId;
 
   final String bucketName;
@@ -44,8 +42,6 @@ class Item {
     );
   }
 
-  /// Helpers for the ID convention you described.
-  /// You choose the 3-letter code (e.g. TSB, PTI) and the sequence (001, 002...).
   static String formatBucketId({
     required String bucketCode3,
     required int sequence,

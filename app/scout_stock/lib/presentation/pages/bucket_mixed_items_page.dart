@@ -1,4 +1,3 @@
-// bucket_mixed_items_page.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -48,8 +47,6 @@ class BucketMixedItemsPage extends ConsumerStatefulWidget {
 class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
   final _searchCtrl = TextEditingController();
 
-  /// Baseline quantities at page open (per item in this bucket page).
-  /// Used to compute "added from this page".
   final Map<String, int> _baseQty = {};
 
   @override
@@ -182,7 +179,6 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
 
     final isEmpty = filtered.isEmpty;
 
-    // CTA sizing like BucketItemPage (and uses GlowingActionButton wrapper)
     const ctaHeight = 70.0;
     const ctaPadding = EdgeInsets.fromLTRB(20, 10, 20, 18);
 
@@ -206,7 +202,6 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
                 CustomScrollView(
                   cacheExtent: 900,
                   slivers: [
-                    // Header (scrolls away)
                     SliverToBoxAdapter(
                       child: Padding(
                         padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
@@ -221,7 +216,6 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
                       ),
                     ),
 
-                    // Sticky search (pinned)
                     SliverPersistentHeader(
                       pinned: true,
                       delegate: _StickySearchDelegate(
@@ -292,7 +286,6 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
                   ],
                 ),
 
-                // Scrim + CTA ONLY when addedCount > 0
                 if (showCta) ...[
                   Positioned(
                     left: 0,
@@ -333,8 +326,6 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
     );
   }
 }
-
-/* ----------------------------- HEADER ----------------------------- */
 
 class BucketMixedHeader extends StatelessWidget {
   const BucketMixedHeader({
@@ -477,8 +468,6 @@ class _CartIconButton extends StatelessWidget {
   }
 }
 
-/* ----------------------------- STICKY SEARCH ----------------------------- */
-
 class _SearchCard extends StatelessWidget {
   const _SearchCard({required this.controller, required this.onChanged});
 
@@ -578,8 +567,6 @@ class _StickySearchDelegate extends SliverPersistentHeaderDelegate {
     return oldDelegate.height != height || oldDelegate.child != child;
   }
 }
-
-/* ----------------------------- ITEM CARD ----------------------------- */
 
 class _MixedBucketItemCard extends StatelessWidget {
   const _MixedBucketItemCard({
@@ -797,8 +784,6 @@ class _QtyStepperSelect extends StatelessWidget {
     );
   }
 }
-
-/* ----------------------------- EMPTY STATE ----------------------------- */
 
 class _EmptyBucketState extends StatelessWidget {
   const _EmptyBucketState({

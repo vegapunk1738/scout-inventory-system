@@ -59,7 +59,6 @@ class CheckoutResultDialog extends StatelessWidget {
   final String title;
   final String message;
 
-  /// Show for success (transaction id) and optionally for failure (error code).
   final String? transactionId;
 
   final String primaryLabel;
@@ -132,11 +131,9 @@ class CheckoutResultDialog extends StatelessWidget {
 
                 const SizedBox(height: 18),
 
-                // Primary (big) action
                 GlowingFilledButton(
                   height: 62,
-                  radius:
-                      tokens.radiusLg, // keep dialog tighter than bottom bar
+                  radius: tokens.radiusLg,
                   label: primaryLabel,
                   icon: Icon(
                     _isSuccess ? Icons.check_rounded : Icons.refresh_rounded,
@@ -150,7 +147,6 @@ class CheckoutResultDialog extends StatelessWidget {
                   },
                 ),
 
-                // Secondary action (only for failure)
                 if (secondaryLabel != null && onSecondary != null) ...[
                   const SizedBox(height: 10),
                   SizedBox(
@@ -193,13 +189,12 @@ class _StatusIcon extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // outer soft ring
           Container(
             width: 92,
             height: 92,
             decoration: BoxDecoration(shape: BoxShape.circle, color: ringBg),
           ),
-          // inner ring
+
           Container(
             width: 74,
             height: 74,
@@ -208,7 +203,7 @@ class _StatusIcon extends StatelessWidget {
               color: color.withValues(alpha: 0.10),
             ),
           ),
-          // solid circle
+
           Container(
             width: 56,
             height: 56,
@@ -266,7 +261,6 @@ class _TxnBox extends StatelessWidget {
   }
 }
 
-/// Nice fade+scale dialog like modern mobile UIs.
 Future<void> showCheckoutResultDialog(
   BuildContext context, {
   required Widget child,

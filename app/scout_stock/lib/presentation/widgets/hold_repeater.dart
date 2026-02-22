@@ -1,19 +1,13 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-/// Hold-to-accelerate ticker:
-/// - waits a short delay
-/// - then ticks periodically
-/// - doubles the step every N ticks up to a cap
 class HoldRepeater {
-  HoldRepeater({
-    required int maxCount,
-    required this.onTick,
-  })  : _maxCount = math.max(1, maxCount),
-        _tickEvery = _calcTickEvery(math.max(1, maxCount)),
-        _doubleEveryTicks = _calcDoubleEveryTicks(math.max(1, maxCount)),
-        _capStep = _calcCapStep(math.max(1, maxCount)),
-        _holdDelay = _calcHoldDelay(math.max(1, maxCount));
+  HoldRepeater({required int maxCount, required this.onTick})
+    : _maxCount = math.max(1, maxCount),
+      _tickEvery = _calcTickEvery(math.max(1, maxCount)),
+      _doubleEveryTicks = _calcDoubleEveryTicks(math.max(1, maxCount)),
+      _capStep = _calcCapStep(math.max(1, maxCount)),
+      _holdDelay = _calcHoldDelay(math.max(1, maxCount));
 
   final void Function(int step) onTick;
 

@@ -35,8 +35,6 @@ class ActivityTxn {
   });
 }
 
-/* ----------------------------- Fake backend (paged) ----------------------------- */
-
 class ActivityPage {
   final List<ActivityTxn> items;
   final bool hasMore;
@@ -47,7 +45,7 @@ class ActivityPage {
 class FakeActivityApi {
   FakeActivityApi({List<ActivityTxn>? seed})
     : _seed = List<ActivityTxn>.from(seed ?? _mockTransactions()) {
-    _seed.sort((a, b) => b.at.compareTo(a.at)); // ✅ sort once
+    _seed.sort((a, b) => b.at.compareTo(a.at));
   }
 
   final List<ActivityTxn> _seed;
@@ -88,8 +86,6 @@ class FakeActivityApi {
   }
 }
 
-/* ---------------------------------- PAGE ---------------------------------- */
-
 class ActivityLogPage extends StatefulWidget {
   const ActivityLogPage({super.key});
 
@@ -103,9 +99,7 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
 
   String _query = "";
 
-  final FakeActivityApi _api = FakeActivityApi(
-    // seed: const [], // <- test empty state
-  );
+  final FakeActivityApi _api = FakeActivityApi();
 
   static const int _pageSize = 10;
   final List<ActivityTxn> _loaded = <ActivityTxn>[];
@@ -164,7 +158,7 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
     _query = v.trim();
     _searchDebounce?.cancel();
     _searchDebounce = Timer(const Duration(milliseconds: 220), _loadInitial);
-    setState(() {}); // just to refresh header text field visuals if needed
+    setState(() {});
   }
 
   void _rebuildRows() {
@@ -358,8 +352,6 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
   }
 }
 
-/* ----------------------------- HEADER ----------------------------- */
-
 class ActivityLogHeader extends StatelessWidget {
   const ActivityLogHeader({
     super.key,
@@ -399,7 +391,6 @@ class ActivityLogHeader extends StatelessWidget {
         ),
         const SizedBox(height: 14),
 
-        // Search card
         Container(
           height: 56,
           decoration: BoxDecoration(
@@ -444,8 +435,6 @@ class ActivityLogHeader extends StatelessWidget {
     );
   }
 }
-
-/* ----------------------------- EMPTY STATE ----------------------------- */
 
 class _EmptyActivityState extends StatelessWidget {
   const _EmptyActivityState({required this.query});
@@ -499,8 +488,6 @@ class _EmptyActivityState extends StatelessWidget {
   }
 }
 
-/* ----------------------------- FLAT ROWS (FAST) ----------------------------- */
-
 enum _RowKind { groupHeader, txn }
 
 class _ActivityRow {
@@ -546,13 +533,13 @@ List<_ActivityRow> _buildRows(List<ActivityTxn> txns) {
 
   final today = _dateOnly(DateTime.now());
   final yesterday = today.subtract(const Duration(days: 1));
-  final last7Start = today.subtract(const Duration(days: 6)); // inclusive
+  final last7Start = today.subtract(const Duration(days: 6));
 
   String leftTitle(DateTime d) {
     if (d == today) return "TODAY";
     if (d == yesterday) return "YESTERDAY";
-    if (!d.isBefore(last7Start)) return _weekdayName(d); // ✅ weekday for last 7
-    return _prettyDate(d).toUpperCase(); // ✅ older => date
+    if (!d.isBefore(last7Start)) return _weekdayName(d);
+    return _prettyDate(d).toUpperCase();
   }
 
   final rows = <_ActivityRow>[];
@@ -618,8 +605,6 @@ class _GroupHeaderRow extends StatelessWidget {
   }
 }
 
-/* ----------------------------- CARD ----------------------------- */
-
 class _ExpandableTxnCard extends StatelessWidget {
   const _ExpandableTxnCard({
     required this.txn,
@@ -657,7 +642,7 @@ class _ExpandableTxnCard extends StatelessWidget {
       builder: (context, isOpen, _) {
         return Material(
           color: Colors.white,
-          elevation: 2, // ✅ smoother than heavy boxShadow while scrolling
+          elevation: 2,
           shadowColor: const Color(0x14000000),
           borderRadius: BorderRadius.circular(radiusXl),
           clipBehavior: Clip.antiAlias,
@@ -869,8 +854,6 @@ class _DetailLine extends StatelessWidget {
   }
 }
 
-/* ----------------------------- HELPERS ----------------------------- */
-
 String _initials(String name) {
   final parts = name.trim().split(RegExp(r"\s+"));
   if (parts.isEmpty) return "?";
@@ -921,8 +904,6 @@ String _weekdayName(DateTime d) {
   ];
   return w[d.weekday - 1];
 }
-
-/* ----------------------------- MOCK DATA ----------------------------- */
 
 List<ActivityTxn> _mockTransactions() {
   final now = DateTime.now();

@@ -24,10 +24,9 @@ class _CartPageState extends ConsumerState<CartPage> {
   bool _submitting = false;
 
   Future<({bool ok, String? txnId, String? error})> _checkoutRequest() async {
-    // Replace with your real API call.
     await Future.delayed(const Duration(milliseconds: 650));
 
-    final ok = Random().nextBool(); // demo
+    final ok = Random().nextBool();
     if (ok) return (ok: true, txnId: '#CH-89204-X', error: null);
     return (ok: false, txnId: null, error: 'E-CHK-500');
   }
@@ -54,11 +53,9 @@ class _CartPageState extends ConsumerState<CartPage> {
     final btnPadTop = compact ? 8.0 : 10.0;
     final btnPadBottom = compact ? 10.0 : 12.0;
 
-    // Total vertical space the bottom button area occupies (including SafeArea).
     final bottomBarFootprint =
         btnHeight + btnPadTop + btnPadBottom + safeBottom;
 
-    // Let the list scroll behind the button, but allow the last item to scroll above it.
     final listBottomPadding = bottomBarFootprint + 12;
 
     return Scaffold(
@@ -121,7 +118,6 @@ class _CartPageState extends ConsumerState<CartPage> {
                   ),
           ),
 
-          // Soft scrim so content behind the button doesn’t look harsh.
           Positioned(
             left: 0,
             right: 0,
@@ -198,8 +194,6 @@ class _CartPageState extends ConsumerState<CartPage> {
     );
   }
 }
-
-/* ----------------------------- Card Row ----------------------------- */
 
 class _CartItemCard extends StatelessWidget {
   const _CartItemCard({
@@ -310,8 +304,6 @@ class _CartItemCard extends StatelessWidget {
   }
 }
 
-/* ----------------------------- Big Stepper (tap + hold) ----------------------------- */
-
 class _QtyStepperBig extends StatelessWidget {
   const _QtyStepperBig({
     required this.value,
@@ -350,7 +342,6 @@ class _QtyStepperBig extends StatelessWidget {
         children: [
           const SizedBox(width: 6),
 
-          // MINUS (tap + hold)
           HoldIconButton(
             enabled: canMinus,
             maxCount: max,
@@ -394,7 +385,6 @@ class _QtyStepperBig extends StatelessWidget {
           ),
           const SizedBox(width: 6),
 
-          // PLUS (tap + hold)
           HoldIconButton(
             enabled: canPlus,
             maxCount: max,
@@ -450,8 +440,6 @@ class _TrashPillButton extends StatelessWidget {
     );
   }
 }
-
-/* ----------------------------- Empty state ----------------------------- */
 
 class _EmptyCart extends StatelessWidget {
   const _EmptyCart({required this.emojiBase, this.titleStyle, this.bodyStyle});

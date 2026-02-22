@@ -1,4 +1,3 @@
-// scan_page.dart
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
@@ -30,20 +29,17 @@ class _ScanPageState extends State<ScanPage>
   ValueNotifier<int>? _navIndex;
   bool _isActive = false;
 
-  // Serialize camera ops to avoid flaky web timing issues.
   Future<void> _cameraQueue = Future.value();
 
-  // Strong guards (don’t rely on controller.value.isRunning on web only)
   bool _starting = false;
   bool _stopping = false;
   bool _running = false;
 
-  // Camera readiness + snap fade
   bool _feedReady = false;
   bool _uiReady = false;
   bool _fading = false;
 
-  late final AnimationController _blackFade; // 1.0 = black, 0.0 = clear
+  late final AnimationController _blackFade;
   VoidCallback? _controllerListener;
 
   String? _lastRaw;
@@ -62,7 +58,7 @@ class _ScanPageState extends State<ScanPage>
     _blackFade = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 320),
-      value: 1.0, // start fully black
+      value: 1.0,
     );
 
     _controller = MobileScannerController(
@@ -78,7 +74,6 @@ class _ScanPageState extends State<ScanPage>
 
       final readyNow = s.hasCameraPermission && s.isRunning;
 
-      // When the feed becomes ready, fade from black -> video and then show UI.
       if (_isActive && readyNow && !_feedReady) {
         _feedReady = true;
         _startSnapFade();
@@ -137,7 +132,7 @@ class _ScanPageState extends State<ScanPage>
     _feedReady = false;
     _uiReady = false;
     _fading = false;
-    _blackFade.value = 1.0; // black cover up immediately
+    _blackFade.value = 1.0;
     if (mounted) setState(() {});
   }
 
@@ -147,13 +142,11 @@ class _ScanPageState extends State<ScanPage>
 
     _fading = true;
 
-    // Keep UI hidden until the fade finishes (Snapchat-y)
     if (mounted) setState(() => _uiReady = false);
 
     try {
       await _blackFade.animateTo(0.0, curve: Curves.easeOutCubic);
     } catch (_) {
-      // ignore animation cancellations
     } finally {
       _fading = false;
       if (mounted && _isActive && _feedReady) {
@@ -168,19 +161,15 @@ class _ScanPageState extends State<ScanPage>
 
     _starting = true;
     try {
-      // Attach listener while active
       _sub ??= _controller.barcodes.listen(_handleBarcodeCapture);
 
-      // If a stop is in progress, let it finish
       if (_stopping) return;
 
-      // Give UI a frame to paint the black cover before camera start
       await Future<void>.delayed(const Duration(milliseconds: 16));
 
       await _controller.start();
       _running = true;
 
-      // Fallback: if listener is late, poll briefly then trigger fade.
       final ready = await _waitUntilVideoRunning(
         timeout: const Duration(seconds: 2),
       );
@@ -192,11 +181,10 @@ class _ScanPageState extends State<ScanPage>
       debugPrint('ScanPage: start failed: $e');
       _running = false;
       if (mounted) {
-        // If start fails, remove black so user isn't stuck (permission overlay still shows).
         _blackFade.value = 0.0;
         setState(() {
           _feedReady = false;
-          _uiReady = true; // allow UI so user can still tap manual entry, etc.
+          _uiReady = true;
         });
       }
     } finally {
@@ -220,7 +208,6 @@ class _ScanPageState extends State<ScanPage>
 
     _stopping = true;
     try {
-      // Stop receiving events first (reduces work while hidden)
       try {
         await _sub?.cancel();
       } catch (_) {}
@@ -283,7 +270,6 @@ class _ScanPageState extends State<ScanPage>
     if (page != null && !_navigating) {
       _navigating = true;
 
-      // Stop camera while inside the bucket page
       _enqueueCamera(_deactivateScanner);
 
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => page)).then((
@@ -292,7 +278,6 @@ class _ScanPageState extends State<ScanPage>
         if (!mounted) return;
         _navigating = false;
 
-        // Resume scanning when returning
         if (_isActive) {
           _resetFadeState();
           _enqueueCamera(_activateScanner);
@@ -335,7 +320,6 @@ class _ScanPageState extends State<ScanPage>
     if (_navigating) return;
     _navigating = true;
 
-    // Stop camera while inside the bucket page
     _enqueueCamera(_deactivateScanner);
 
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
@@ -343,7 +327,6 @@ class _ScanPageState extends State<ScanPage>
     if (!mounted) return;
     _navigating = false;
 
-    // Resume scanning when returning
     if (_isActive) {
       _resetFadeState();
       _enqueueCamera(_activateScanner);
@@ -414,7 +397,6 @@ class _ScanPageState extends State<ScanPage>
 
     _navigating = true;
 
-    // Stop camera while inside the bucket page
     _enqueueCamera(_deactivateScanner);
 
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
@@ -422,7 +404,6 @@ class _ScanPageState extends State<ScanPage>
     if (!mounted) return true;
     _navigating = false;
 
-    // Resume scanning when returning
     if (_isActive) {
       _resetFadeState();
       _enqueueCamera(_activateScanner);
@@ -436,10 +417,8 @@ class _ScanPageState extends State<ScanPage>
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final safe = MediaQuery.paddingOf(context);
 
-    // BackdropFilter is expensive on Web. Keep look on mobile, skip blur on web.
     final allowBlur = !kIsWeb;
 
-    // Overlays appear after fade is done (and only when active)
     final showOverlays = _isActive && _uiReady;
 
     return Scaffold(
@@ -448,7 +427,6 @@ class _ScanPageState extends State<ScanPage>
           final w = c.maxWidth;
           final h = c.maxHeight;
 
-          // --- Layout constants ---
           const sidePad = 16.0;
           const topPad = 10.0;
 
@@ -497,7 +475,6 @@ class _ScanPageState extends State<ScanPage>
           return Stack(
             fit: StackFit.expand,
             children: [
-              // Keep scanner widget mounted (smoother switching)
               RepaintBoundary(
                 child: MobileScanner(
                   controller: _controller,
@@ -505,11 +482,9 @@ class _ScanPageState extends State<ScanPage>
                 ),
               ),
 
-              // Hard-hide camera when not active (privacy + avoids last frame)
               if (!_isActive)
                 const Positioned.fill(child: ColoredBox(color: Colors.black)),
 
-              // Gradient overlay (cheap)
               Positioned.fill(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
@@ -528,8 +503,6 @@ class _ScanPageState extends State<ScanPage>
                 ),
               ),
 
-              // Snapchat-like fade: black cover that fades out when feed is ready.
-              // (Only when active; when inactive we already hard-hide camera.)
               if (_isActive)
                 Positioned.fill(
                   child: IgnorePointer(
@@ -547,7 +520,6 @@ class _ScanPageState extends State<ScanPage>
                   ),
                 ),
 
-              // --- UI overlays (fade in quickly after snap fade ends) ---
               AnimatedOpacity(
                 opacity: showOverlays ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 160),
@@ -557,7 +529,6 @@ class _ScanPageState extends State<ScanPage>
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      // Top pill
                       Positioned(
                         top: topY,
                         left: sidePad,
@@ -584,7 +555,6 @@ class _ScanPageState extends State<ScanPage>
                         ),
                       ),
 
-                      // Title
                       Positioned(
                         top: titleY + 20,
                         left: sidePad,
@@ -604,7 +574,6 @@ class _ScanPageState extends State<ScanPage>
                         ),
                       ),
 
-                      // Scan frame
                       Positioned(
                         top: frameY,
                         left: (w - frameSize) / 2,
@@ -650,7 +619,6 @@ class _ScanPageState extends State<ScanPage>
                         ),
                       ),
 
-                      // Auto scan pill
                       Positioned(
                         top: frameY + frameSize + gapFrameToPill,
                         left: 0,
@@ -664,7 +632,6 @@ class _ScanPageState extends State<ScanPage>
                         ),
                       ),
 
-                      // Manual entry button
                       Positioned(
                         left: sidePad,
                         right: sidePad,
@@ -713,7 +680,6 @@ class _ScanPageState extends State<ScanPage>
                 ),
               ),
 
-              // Permission helper overlay (show whenever active and permission missing)
               if (_isActive)
                 Positioned.fill(
                   child: IgnorePointer(
@@ -758,8 +724,6 @@ class _ScanPageState extends State<ScanPage>
     );
   }
 }
-
-/* ----------------------------- UI PARTS ----------------------------- */
 
 class _LastScannedPill extends StatelessWidget {
   const _LastScannedPill({
@@ -963,7 +927,6 @@ class _ScanFramePainter extends CustomPainter {
     const cornerLen = 34.0;
     const inset = 2.0;
 
-    // TL
     canvas.drawLine(
       Offset(inset, cornerLen),
       const Offset(inset, inset),
@@ -975,7 +938,6 @@ class _ScanFramePainter extends CustomPainter {
       cornerPaint,
     );
 
-    // TR
     canvas.drawLine(
       Offset(size.width - cornerLen, inset),
       Offset(size.width - inset, inset),
@@ -987,7 +949,6 @@ class _ScanFramePainter extends CustomPainter {
       cornerPaint,
     );
 
-    // BL
     canvas.drawLine(
       Offset(inset, size.height - cornerLen),
       Offset(inset, size.height - inset),
@@ -999,7 +960,6 @@ class _ScanFramePainter extends CustomPainter {
       cornerPaint,
     );
 
-    // BR
     canvas.drawLine(
       Offset(size.width - cornerLen, size.height - inset),
       Offset(size.width - inset, size.height - inset),

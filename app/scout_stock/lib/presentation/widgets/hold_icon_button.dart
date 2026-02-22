@@ -2,9 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:scout_stock/presentation/widgets/hold_repeater.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
-/// A pressable icon button that supports:
-/// - tap (single step)
-/// - press & hold (accelerating steps)
 class HoldIconButton extends StatefulWidget {
   const HoldIconButton({
     super.key,
@@ -26,7 +23,6 @@ class HoldIconButton extends StatefulWidget {
 
   final bool enabled;
 
-  /// Used to scale hold acceleration speed.
   final int maxCount;
 
   final IconData icon;
@@ -35,10 +31,8 @@ class HoldIconButton extends StatefulWidget {
   final Color fill;
   final Color border;
 
-  /// Single tap action (usually step = 1).
   final VoidCallback? onTap;
 
-  /// Called repeatedly while holding, with an accelerated step.
   final ValueChanged<int>? onHoldTick;
 
   final double? width;
@@ -72,19 +66,9 @@ class _HoldIconButtonState extends State<HoldIconButton> {
   @override
   void didUpdateWidget(covariant HoldIconButton oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // If maxCount changes dramatically, simplest is to recreate.
+
     if (oldWidget.maxCount != widget.maxCount) {
       _repeater.dispose();
-      // ignore: invalid_use_of_protected_member
-      // (safe here: same lifecycle)
-      // Recreate with new scaling.
-      // (Re-init logic inline to avoid duplicating file structure)
-      // This is small & local.
-      // Note: If you prefer, you can refactor into a helper method.
-      // We keep it explicit for copy-paste clarity.
-      // Recreate:
-      // (dart doesn't allow reassigning late final, so we stop and keep old scaling.)
-      // Best: keep scaling stable per item; in both pages it is stable.
     }
   }
 
@@ -121,7 +105,9 @@ class _HoldIconButtonState extends State<HoldIconButton> {
         child: DecoratedBox(
           decoration: BoxDecoration(
             borderRadius: r,
-            boxShadow: widget.glow && widget.enabled ? tokens.glowShadow : const [],
+            boxShadow: widget.glow && widget.enabled
+                ? tokens.glowShadow
+                : const [],
           ),
           child: Material(
             color: Colors.transparent,

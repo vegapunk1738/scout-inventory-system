@@ -18,15 +18,13 @@ class BucketItemPage extends ConsumerStatefulWidget {
 }
 
 class _BucketItemPageState extends ConsumerState<BucketItemPage> {
-  // Mocked (for ABC-ABC-123)
   final int bucketNumber = 42;
   final String bucketName = 'Patrol Box Alpha';
 
   final String itemName = 'Propane Canisters';
-  // keep SKU removed from UI (this variable is harmless)
   final String sku = 'OUT-PRO-16OZ';
 
-  final int maxCount = 1000; // “max”
+  final int maxCount = 1000; 
   int qty = 12;
 
   bool _loading = false;
@@ -44,12 +42,10 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
   void _decTap() => _applyDelta(-1);
   void _incTap() => _applyDelta(1);
 
-  // ✅ ADD TO CART now writes to CartNotifier then pops back to ScanPage
   Future<void> _addToCart() async {
     if (_loading || qty <= 0) return;
     setState(() => _loading = true);
 
-    // Build an Item (mock IDs for now — replace later when real data is wired)
     final bucketId = Item.formatBucketId(
       bucketCode3: 'PBX',
       sequence: bucketNumber,
@@ -66,16 +62,13 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
       emoji: '⛽',
     );
 
-    // Add/merge into cart
     ref.read(cartProvider.notifier).addItem(item);
 
-    // Optional tiny delay so the loading state is visible (feels responsive)
     await Future<void>.delayed(const Duration(milliseconds: 120));
 
     if (!mounted) return;
     setState(() => _loading = false);
 
-    // Go back to scanner (ScanPage will resume camera in your existing .then handler)
     Navigator.of(context).pop(true);
   }
 
@@ -214,7 +207,6 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
               ),
               child: Row(
                 children: [
-                  // MINUS (tap + hold)
                   HoldIconButton(
                     enabled: canDec,
                     maxCount: maxCount,
@@ -253,7 +245,6 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
                   ),
                   const SizedBox(width: 12),
 
-                  // PLUS (tap + hold)
                   HoldIconButton(
                     enabled: canInc,
                     maxCount: maxCount,

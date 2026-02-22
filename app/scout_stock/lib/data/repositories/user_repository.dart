@@ -5,7 +5,6 @@ abstract class UserRepository {
   Future<AppUser> getCurrentUser();
 }
 
-/// Mock implementation until backend is ready.
 class MockUserRepository implements UserRepository {
   const MockUserRepository({required this.pretendAdmin});
 

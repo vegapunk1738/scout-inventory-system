@@ -172,7 +172,7 @@ class MeNotifier extends Notifier<MeState> {
     state = state.copyWith(submitting: true);
     try {
       await Future.delayed(const Duration(milliseconds: 650));
-      final ok = Random().nextBool(); // mock
+      final ok = Random().nextBool();
 
       if (!ok) {
         return (ok: false, txnId: null, error: 'E-RTN-500');
@@ -184,7 +184,7 @@ class MeNotifier extends Notifier<MeState> {
       final newBorrowed = <BorrowedRecord>[];
 
       for (final br in state.borrowed) {
-        final selected = br.item.quantity; // to return
+        final selected = br.item.quantity;
         final outQty = br.item.maxQuantity;
 
         if (selected <= 0) {
@@ -192,7 +192,6 @@ class MeNotifier extends Notifier<MeState> {
           continue;
         }
 
-        // add returned record
         newReturned.add(
           ReturnedRecord(
             id: 'rr_${now.microsecondsSinceEpoch}_${br.id}',
@@ -203,7 +202,6 @@ class MeNotifier extends Notifier<MeState> {
 
         final remaining = outQty - selected;
         if (remaining > 0) {
-          // keep borrowed with remaining out qty; reset selection to 0
           newBorrowed.add(
             br.copyWith(
               item: br.item.copyWith(quantity: 0, maxQuantity: remaining),

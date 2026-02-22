@@ -28,7 +28,6 @@ class CartState {
 class CartNotifier extends Notifier<CartState> {
   @override
   CartState build() {
-    // Demo seed (remove later when Scan/Bucket flow is wired)
     final demoItems = <Item>[
       Item(
         id: Item.formatItemId(itemCode3: 'CPT', sequence: 1),
@@ -147,7 +146,6 @@ class CartNotifier extends Notifier<CartState> {
 
     final items = [...state.items];
 
-    // If it already exists (same id), restore its snapshot (quantity, etc.)
     final existingIdx = items.indexWhere((x) => x.id == entry.item.id);
     if (existingIdx != -1) {
       items[existingIdx] = entry.item.copyWith(

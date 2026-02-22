@@ -1,10 +1,5 @@
 import '../enums/user_role.dart';
 
-/// Matches backend requirements:
-/// - name
-/// - identifier (email/username/scout ID)
-/// - role (explicit, not inferred)
-/// Also includes an `id` for DB primary key.
 class AppUser {
   final String id;
   final String name;
