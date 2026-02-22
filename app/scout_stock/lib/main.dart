@@ -7,6 +7,7 @@ import 'package:scout_stock/presentation/pages/cart_page.dart';
 import 'package:scout_stock/presentation/pages/me_page.dart';
 import 'package:scout_stock/presentation/pages/scan_page.dart';
 import 'package:scout_stock/presentation/widgets/admin_shell.dart';
+import 'package:scout_stock/presentation/pages/admin/users_page.dart';
 
 import 'package:scout_stock/theme/app_theme.dart';
 
@@ -39,7 +40,7 @@ class MyApp extends ConsumerWidget {
                     MePage(),
                     const _PlaceholderPage(title: "Manage"),
                     const ActivityLogPage(),
-                    const _PlaceholderPage(title: "Users"),
+                    const UsersAdminPage(),
                   ],
                   initialIndex: 0,
                 )
