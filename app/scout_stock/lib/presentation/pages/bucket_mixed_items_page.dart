@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import 'package:scout_stock/domain/models/item.dart';
-import 'package:scout_stock/presentation/pages/cart_page.dart';
-import 'package:scout_stock/presentation/pages/scan_page.dart';
+import 'package:scout_stock/router/app_routes.dart';
 import 'package:scout_stock/presentation/widgets/admin_shell.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
@@ -37,6 +37,8 @@ class BucketMixedItemsPage extends ConsumerStatefulWidget {
   final String bucketId;
   final String bucketName;
   final List<BucketCatalogItem> items;
+
+  /// Kept for compatibility (legacy shell). Not used for go_router navigation.
   final int cartTabIndex;
 
   @override
@@ -46,7 +48,6 @@ class BucketMixedItemsPage extends ConsumerStatefulWidget {
 
 class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
   final _searchCtrl = TextEditingController();
-
   final Map<String, int> _baseQty = {};
 
   @override
@@ -65,11 +66,10 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
   }
 
   void _captureBaseline() {
-    final cart = ref.read(cartProvider);
-    final items = cart.items;
+    final cartItems = ref.read(cartProvider).items;
     for (final cat in widget.items) {
-      final idx = items.indexWhere((x) => x.id == cat.id);
-      _baseQty[cat.id] = idx == -1 ? 0 : items[idx].quantity;
+      final idx = cartItems.indexWhere((x) => x.id == cat.id);
+      _baseQty[cat.id] = idx == -1 ? 0 : cartItems[idx].quantity;
     }
   }
 
@@ -86,17 +86,18 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
     return null;
   }
 
-  void _openCart(BuildContext context) {
-    final idx = AdminShellScope.maybeOf(context);
-    if (idx != null) {
-      idx.value = widget.cartTabIndex;
-      Navigator.of(context).maybePop();
+  void _onBack(BuildContext context) {
+    if (context.canPop()) {
+      context.pop();
       return;
     }
+    context.go(AppRoutes.scan);
+  }
 
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const CartPage()));
+  void _openCart(BuildContext context) {
+    // Always URL-route (web-friendly). Admins will be redirected to /a/cart.
+    // Using `go` mirrors the old behavior of "leave bucket, show cart".
+    context.go(AppRoutes.cart);
   }
 
   void _applyDelta({
@@ -155,13 +156,10 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
     final w = MediaQuery.sizeOf(context).width;
     final compact = w < 380;
 
-    final cart = ref.watch(cartProvider);
-    final cartItems = cart.items;
+    // Narrow rebuilds to items only (good for older phones).
+    final cartItems = ref.watch(cartProvider.select((c) => c.items));
 
-    final totalCartCount = cartItems.fold<int>(
-      0,
-      (sum, it) => sum + it.quantity,
-    );
+    final totalCartCount = cartItems.fold<int>(0, (sum, it) => sum + it.quantity);
 
     final addedCount = _addedFromThisPage(cartItems);
     final showCta = addedCount > 0;
@@ -170,12 +168,12 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
     final filtered = q.isEmpty
         ? widget.items
         : widget.items
-              .where(
-                (it) =>
-                    it.name.toLowerCase().contains(q) ||
-                    it.id.toLowerCase().contains(q),
-              )
-              .toList(growable: false);
+            .where(
+              (it) =>
+                  it.name.toLowerCase().contains(q) ||
+                  it.id.toLowerCase().contains(q),
+            )
+            .toList(growable: false);
 
     final isEmpty = filtered.isEmpty;
 
@@ -210,12 +208,11 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
                           bucketName: widget.bucketName,
                           itemTypesCount: widget.items.length,
                           cartCount: totalCartCount,
-                          onBack: () => Navigator.of(context).maybePop(),
+                          onBack: () => _onBack(context),
                           onCart: () => _openCart(context),
                         ),
                       ),
                     ),
-
                     SliverPersistentHeader(
                       pinned: true,
                       delegate: _StickySearchDelegate(
@@ -231,16 +228,13 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
                         ),
                       ),
                     ),
-
                     if (isEmpty)
                       SliverFillRemaining(
                         hasScrollBody: false,
                         child: _EmptyBucketState(
                           query: _searchCtrl.text.trim(),
                           titleStyle: t.titleLarge,
-                          bodyStyle: t.bodyLarge?.copyWith(
-                            color: AppColors.muted,
-                          ),
+                          bodyStyle: t.bodyLarge?.copyWith(color: AppColors.muted),
                         ),
                       )
                     else
@@ -285,7 +279,6 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
                       ),
                   ],
                 ),
-
                 if (showCta) ...[
                   Positioned(
                     left: 0,

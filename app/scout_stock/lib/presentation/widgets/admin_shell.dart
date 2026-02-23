@@ -1,7 +1,13 @@
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
+/// ---------------------------------------------------------------------------
+/// Legacy shell (kept for compatibility).
+/// If you're moving to go_router StatefulShellRoute, use [AdminRouterShell].
+/// ---------------------------------------------------------------------------
 class AdminShell extends StatefulWidget {
   const AdminShell({super.key, required this.pages, this.initialIndex = 0});
   final List<Widget> pages;
@@ -11,6 +17,7 @@ class AdminShell extends StatefulWidget {
   State<AdminShell> createState() => _AdminShellState();
 }
 
+/// Provides current selected admin tab index (works for both legacy + router shell).
 class AdminShellScope extends InheritedNotifier<ValueNotifier<int>> {
   const AdminShellScope({
     super.key,
@@ -26,9 +33,7 @@ class AdminShellScope extends InheritedNotifier<ValueNotifier<int>> {
 }
 
 class _AdminShellState extends State<AdminShell> {
-  late final ValueNotifier<int> _index = ValueNotifier<int>(
-    widget.initialIndex,
-  );
+  late final ValueNotifier<int> _index = ValueNotifier<int>(widget.initialIndex);
 
   @override
   void dispose() {
@@ -50,6 +55,72 @@ class _AdminShellState extends State<AdminShell> {
           valueListenable: _index,
           builder: (_, i, _) =>
               _AdminBottomNav(index: i, onTap: (next) => _index.value = next),
+        ),
+      ),
+    );
+  }
+}
+
+/// ---------------------------------------------------------------------------
+/// GoRouter shell: drop-in replacement used with StatefulShellRoute.indexedStack.
+/// - Preserves per-tab navigator stacks (fast, web-friendly)
+/// - Keeps UI identical (reuses the same bottom nav widgets)
+/// - Updates selected tab on browser back/forward without extra work
+/// ---------------------------------------------------------------------------
+class AdminRouterShell extends StatefulWidget {
+  const AdminRouterShell({super.key, required this.navigationShell});
+
+  final StatefulNavigationShell navigationShell;
+
+  @override
+  State<AdminRouterShell> createState() => _AdminRouterShellState();
+}
+
+class _AdminRouterShellState extends State<AdminRouterShell> {
+  late final ValueNotifier<int> _index =
+      ValueNotifier<int>(widget.navigationShell.currentIndex);
+
+  @override
+  void didUpdateWidget(covariant AdminRouterShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // Keep the nav UI in sync with URL changes (browser back/forward, deep links).
+    final current = widget.navigationShell.currentIndex;
+    if (_index.value != current) {
+      _index.value = current;
+    }
+  }
+
+  @override
+  void dispose() {
+    _index.dispose();
+    super.dispose();
+  }
+
+  void _onTap(int next) {
+    final current = widget.navigationShell.currentIndex;
+
+    // If the user taps the current tab again, go to the branch root.
+    // This is a nice UX, and it's fast because branches are kept alive.
+    final bool goToInitial = next == current;
+
+    _index.value = next;
+    widget.navigationShell.goBranch(
+      next,
+      initialLocation: goToInitial,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AdminShellScope(
+      indexListenable: _index,
+      child: Scaffold(
+        extendBody: true,
+        body: widget.navigationShell,
+        bottomNavigationBar: ValueListenableBuilder<int>(
+          valueListenable: _index,
+          builder: (_, i, _) => _AdminBottomNav(index: i, onTap: _onTap),
         ),
       ),
     );
@@ -78,7 +149,7 @@ class _AdminBottomNav extends StatelessWidget {
           layoutBuilder: (currentChild, previousChildren) {
             return Stack(
               alignment: Alignment.bottomCenter,
-              children: <Widget>[...previousChildren, ?currentChild],
+              children: <Widget>[...previousChildren, if (currentChild != null) currentChild],
             );
           },
           transitionBuilder: (child, animation) {

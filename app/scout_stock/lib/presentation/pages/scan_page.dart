@@ -4,13 +4,12 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:scout_stock/presentation/pages/bucket_mixed_items_page.dart';
-import 'package:scout_stock/presentation/pages/bucket_single_item_page.dart';
+import 'package:scout_stock/router/app_routes.dart';
 
 import '../../theme/app_theme.dart';
 import '../widgets/admin_shell.dart';
-import 'manual_entry_page.dart';
 
 class ScanPage extends StatefulWidget {
   const ScanPage({super.key});
@@ -71,7 +70,6 @@ class _ScanPageState extends State<ScanPage>
     _controllerListener = () {
       if (!mounted) return;
       final s = _controller.value;
-
       final readyNow = s.hasCameraPermission && s.isRunning;
 
       if (_isActive && readyNow && !_feedReady) {
@@ -106,7 +104,6 @@ class _ScanPageState extends State<ScanPage>
 
     if (_isActive) {
       _resetFadeState();
-
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _isActive) _enqueueCamera(_activateScanner);
       });
@@ -147,6 +144,7 @@ class _ScanPageState extends State<ScanPage>
     try {
       await _blackFade.animateTo(0.0, curve: Curves.easeOutCubic);
     } catch (_) {
+      // ignore
     } finally {
       _fading = false;
       if (mounted && _isActive && _feedReady) {
@@ -266,23 +264,9 @@ class _ScanPageState extends State<ScanPage>
       setState(() => _lastBucketLabel = label);
     }
 
-    final page = _demoPageForRaw(raw);
-    if (page != null && !_navigating) {
-      _navigating = true;
-
-      _enqueueCamera(_deactivateScanner);
-
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => page)).then((
-        _,
-      ) {
-        if (!mounted) return;
-        _navigating = false;
-
-        if (_isActive) {
-          _resetFadeState();
-          _enqueueCamera(_activateScanner);
-        }
-      });
+    // Always route by URL (fast on web, supports deep links/back/forward).
+    if (!_navigating) {
+      _navigateToBucket(raw);
     }
   }
 
@@ -290,6 +274,32 @@ class _ScanPageState extends State<ScanPage>
     final m = _digits.firstMatch(raw);
     if (m != null) return 'Bucket #${m.group(1)}';
     return raw;
+  }
+
+  Future<void> _navigateToBucket(String raw) async {
+    if (!mounted) return;
+    if (_navigating) return;
+
+    _navigating = true;
+    _enqueueCamera(_deactivateScanner);
+
+    try {
+      await context.push(AppRoutes.bucket(raw));
+    } finally {
+      if (!mounted) return;
+      _navigating = false;
+
+      if (_isActive) {
+        _resetFadeState();
+        _enqueueCamera(_activateScanner);
+      }
+    }
+  }
+
+  Future<void> _openLastScanned() async {
+    final raw = _lastRaw;
+    if (raw == null || raw.isEmpty) return;
+    await _navigateToBucket(raw);
   }
 
   @override
@@ -310,115 +320,12 @@ class _ScanPageState extends State<ScanPage>
     super.dispose();
   }
 
-  Future<void> _openLastScannedIfDemo() async {
-    final raw = _lastRaw;
-    if (raw == null || raw.isEmpty) return;
-
-    final page = _demoPageForRaw(raw);
-    if (page == null) return;
-
-    if (_navigating) return;
-    _navigating = true;
-
-    _enqueueCamera(_deactivateScanner);
-
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
-
-    if (!mounted) return;
-    _navigating = false;
-
-    if (_isActive) {
-      _resetFadeState();
-      _enqueueCamera(_activateScanner);
-    }
-  }
-
-  Widget? _demoPageForRaw(String raw) {
-    if (raw == 'ABC-ABC-123') {
-      return BucketItemPage(barcode: raw);
-    }
-
-    if (raw == 'AAA-AAA-111') {
-      return BucketMixedItemsPage(
-        bucketId: raw,
-        bucketName: 'Bucket 1',
-        items: _mockMixedBucketItems(),
-      );
-    }
-
-    return null;
-  }
-
-  List<BucketCatalogItem> _mockMixedBucketItems() {
-    return const [
-      BucketCatalogItem(
-        id: 'ITM-HDS-0001',
-        name: 'Heavy Duty Stakes',
-        emoji: '📌',
-        available: 12,
-      ),
-      BucketCatalogItem(
-        id: 'ITM-NRP-0002',
-        name: 'Nylon Rope (10m)',
-        emoji: '🪢',
-        available: 5,
-      ),
-      BucketCatalogItem(
-        id: 'ITM-LED-0003',
-        name: 'LED Lantern',
-        emoji: '🔦',
-        available: 0,
-      ),
-      BucketCatalogItem(
-        id: 'ITM-FAK-0004',
-        name: 'First Aid Kit',
-        emoji: '🧰',
-        available: 3,
-      ),
-      BucketCatalogItem(
-        id: 'ITM-RML-0005',
-        name: 'Rubber Mallet',
-        emoji: '🔨',
-        available: 2,
-      ),
-      BucketCatalogItem(
-        id: 'ITM-AAB-0006',
-        name: 'AA Batteries',
-        emoji: '🔋',
-        available: 8,
-      ),
-    ];
-  }
-
-  Future<bool> _openBucketIfDemo(String raw) async {
-    final page = _demoPageForRaw(raw);
-    if (page == null) return false;
-    if (_navigating) return true;
-
-    _navigating = true;
-
-    _enqueueCamera(_deactivateScanner);
-
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
-
-    if (!mounted) return true;
-    _navigating = false;
-
-    if (_isActive) {
-      _resetFadeState();
-      _enqueueCamera(_activateScanner);
-    }
-
-    return true;
-  }
-
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final safe = MediaQuery.paddingOf(context);
 
     final allowBlur = !kIsWeb;
-
     final showOverlays = _isActive && _uiReady;
 
     return Scaffold(
@@ -547,7 +454,7 @@ class _ScanPageState extends State<ScanPage>
                                     (_lastBucketLabel == null ||
                                         _lastRaw == null)
                                     ? null
-                                    : _openLastScannedIfDemo,
+                                    : _openLastScanned,
                               ),
                             ),
                             const Spacer(),
@@ -642,12 +549,9 @@ class _ScanPageState extends State<ScanPage>
                           onPressed: () async {
                             _enqueueCamera(_deactivateScanner);
 
-                            final code = await Navigator.of(context)
-                                .push<String>(
-                                  MaterialPageRoute(
-                                    builder: (_) => const ManualEntryPage(),
-                                  ),
-                                );
+                            final code = await context.push<String>(
+                              AppRoutes.manualEntry,
+                            );
 
                             if (!mounted) return;
 
@@ -666,12 +570,7 @@ class _ScanPageState extends State<ScanPage>
                               _lastBucketLabel = _bucketLabelFromRaw(code);
                             });
 
-                            final opened = await _openBucketIfDemo(code);
-
-                            if (!opened && _isActive) {
-                              _resetFadeState();
-                              _enqueueCamera(_activateScanner);
-                            }
+                            await _navigateToBucket(code);
                           },
                         ),
                       ),
@@ -742,7 +641,7 @@ class _LastScannedPill extends StatelessWidget {
     final fg = Colors.white.withValues(alpha: 0.92);
 
     return InkWell(
-      onTap: onTap,
+      onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(18),
       child: Container(
         height: 56,
