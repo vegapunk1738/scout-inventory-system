@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 
+import 'package:scout_stock/presentation/widgets/dotted_background.dart';
+import 'package:scout_stock/presentation/widgets/checkout_result_dialog.dart';
+import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
+import 'package:scout_stock/presentation/widgets/hold_icon_button.dart';
 import 'package:scout_stock/state/notifiers/me_notifier.dart';
+
 import 'package:scout_stock/state/providers/me_provider.dart';
 import 'package:scout_stock/state/providers/current_user_provider.dart';
 
 import 'package:scout_stock/theme/app_theme.dart';
-import 'package:scout_stock/presentation/widgets/checkout_result_dialog.dart';
-import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
-import 'package:scout_stock/presentation/widgets/hold_icon_button.dart';
 
 class MePage extends ConsumerWidget {
   const MePage({super.key});
@@ -25,15 +26,8 @@ class MePage extends ConsumerWidget {
     final tokens = Theme.of(context).extension<AppTokens>()!;
 
     final top = MediaQuery.of(context).padding.top;
-    final safeBottom = MediaQuery.of(context).viewPadding.bottom;
+    final safeBottom = MediaQuery.of(context).padding.bottom;
     final compact = MediaQuery.sizeOf(context).width < 380;
-
-    // Estimate the height of the persistent bottom nav overlay.
-    // - Material 3 NavigationBar is ~80
-    // - BottomNavigationBar is 56
-    final navBarHeight = Theme.of(context).useMaterial3
-        ? 80.0
-        : kBottomNavigationBarHeight;
 
     final shadow = tokens.cardShadow.isNotEmpty
         ? [
@@ -43,14 +37,6 @@ class MePage extends ConsumerWidget {
             ),
           ]
         : const <BoxShadow>[];
-
-    final btnHeight = compact ? 62.0 : 66.0;
-    final btnPadding = EdgeInsets.fromLTRB(
-      compact ? 14 : 16,
-      compact ? 8 : 10,
-      compact ? 14 : 16,
-      compact ? 10 : 12,
-    );
 
     final displayName = userAsync.maybeWhen(
       data: (u) => u.name,
@@ -123,20 +109,25 @@ class MePage extends ConsumerWidget {
         me.totalToReturn > 0 &&
         me.borrowed.isNotEmpty;
 
+    // ✅ Match CartPage bottom button behavior (no manual navBarHeight offset).
+    final btnHeight = compact ? 62.0 : 66.0;
+    final btnPadTop = compact ? 8.0 : 10.0;
+    final btnPadBottom = compact ? 10.0 : 12.0;
+
+    final bottomBarFootprint = showBottomReturn
+        ? (btnHeight + btnPadTop + btnPadBottom + safeBottom)
+        : 0;
+
+    final double listBottomPadding = showBottomReturn
+        ? (bottomBarFootprint + 12.0)
+        : (safeBottom + 14.0);
+
     final emojiBase = GoogleFonts.notoColorEmoji(height: 1);
     final listSide = compact ? 12.0 : 14.0;
 
-    // Space we must always keep so the bottom nav never covers the last item.
-    final baseBottomInset = navBarHeight + safeBottom + 14;
-
-    // Extra space needed when the floating Return button is visible.
-    final returnButtonFootprint =
-        btnHeight + btnPadding.vertical + 12; // + a little breathing room
-
-    final listBottomSpacer =
-        baseBottomInset + (showBottomReturn ? returnButtonFootprint : 0);
-
-    final bottomFadeHeight = listBottomSpacer + 34;
+    // ✅ Sticky header (profile + pills), pinned like Review Cart AppBar.
+    // Height is deterministic (single-line name), so we can use fixed extents.
+    final stickyExtent = (top + 12) + 44 + 14 + 56 + 12;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -148,32 +139,19 @@ class MePage extends ConsumerWidget {
             child: CustomScrollView(
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               slivers: [
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(20, top + 12, 20, 14),
-                    child: _MeHeader(
-                      name: displayName,
-                      role: role,
-                      initials: initials,
-                      onSettings: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Settings coming soon")),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                    child: _BorrowReturnPills(
-                      mode: me.mode,
-                      onTapBorrowed: () =>
-                          notifier.toggleMode(MeFilterMode.borrowedOnly),
-                      onTapReturned: () =>
-                          notifier.toggleMode(MeFilterMode.returnedOnly),
-                    ),
+                SliverPersistentHeader(
+                  pinned: true,
+                  delegate: _MeStickyHeaderDelegate(
+                    extent: stickyExtent,
+                    top: top,
+                    name: displayName,
+                    role: role,
+                    initials: initials,
+                    mode: me.mode,
+                    onTapBorrowed: () =>
+                        notifier.toggleMode(MeFilterMode.borrowedOnly),
+                    onTapReturned: () =>
+                        notifier.toggleMode(MeFilterMode.returnedOnly),
                   ),
                 ),
 
@@ -181,7 +159,7 @@ class MePage extends ConsumerWidget {
                   SliverFillRemaining(
                     hasScrollBody: false,
                     child: Padding(
-                      padding: EdgeInsets.only(bottom: baseBottomInset),
+                      padding: EdgeInsets.only(bottom: safeBottom + 14),
                       child: _EmptyMeState(
                         title: emptyTitle,
                         subtitle: emptySubtitle,
@@ -251,21 +229,21 @@ class MePage extends ConsumerWidget {
                     ),
                   ),
 
-                // ✅ Always add enough bottom spacer for the persistent nav bar.
-                SliverToBoxAdapter(child: SizedBox(height: listBottomSpacer)),
+                // ✅ Bottom spacer so the last card is never hidden behind the Return button.
+                SliverToBoxAdapter(child: SizedBox(height: listBottomPadding)),
               ],
             ),
           ),
 
-          // Soft fade behind the floating return button (and also helps the nav overlay feel nicer).
-          if (showBottomReturn)
+          // ✅ Fade + bottom button (same pattern as CartPage)
+          if (showBottomReturn) ...[
             Positioned(
               left: 0,
               right: 0,
               bottom: 0,
               child: IgnorePointer(
                 child: Container(
-                  height: bottomFadeHeight,
+                  height: bottomBarFootprint + 24,
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
@@ -279,30 +257,117 @@ class MePage extends ConsumerWidget {
                 ),
               ),
             ),
-
-          // ✅ Float the action button ABOVE the persistent nav bar.
-          if (showBottomReturn)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: navBarHeight,
-              child: SafeArea(
-                top: false,
-                child: GlowingActionButton(
-                  label: me.totalToReturn == 1
-                      ? "Return Items (1)"
-                      : "Return Items (${me.totalToReturn})",
-                  icon: const Icon(Icons.keyboard_return_rounded),
-                  loading: me.submitting,
-                  onPressed: me.submitting ? null : onReturn,
-                  padding: btnPadding,
-                  height: btnHeight,
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: GlowingActionButton(
+                label: me.totalToReturn == 1
+                    ? "Return Items (1)"
+                    : "Return Items (${me.totalToReturn})",
+                icon: const Icon(Icons.keyboard_return_rounded),
+                loading: me.submitting,
+                onPressed: me.submitting ? null : onReturn,
+                height: btnHeight,
+                padding: EdgeInsets.fromLTRB(
+                  compact ? 14 : 16,
+                  btnPadTop,
+                  compact ? 14 : 16,
+                  btnPadBottom,
                 ),
               ),
             ),
+          ],
         ],
       ),
     );
+  }
+}
+
+class _MeStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
+  _MeStickyHeaderDelegate({
+    required this.extent,
+    required this.top,
+    required this.name,
+    required this.role,
+    required this.initials,
+    required this.mode,
+    required this.onTapBorrowed,
+    required this.onTapReturned,
+  });
+
+  final double extent;
+  final double top;
+
+  final String name;
+  final String role;
+  final String initials;
+
+  final MeFilterMode mode;
+  final VoidCallback onTapBorrowed;
+  final VoidCallback onTapReturned;
+
+  @override
+  double get minExtent => extent;
+
+  @override
+  double get maxExtent => extent;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    final tokens = Theme.of(context).extension<AppTokens>()!;
+    final showShadow = overlapsContent || shrinkOffset > 0.5;
+
+    final headerShadow = showShadow && tokens.cardShadow.isNotEmpty
+        ? [
+            tokens.cardShadow.first.copyWith(
+              blurRadius: 10,
+              offset: const Offset(0, 6),
+            ),
+          ]
+        : const <BoxShadow>[];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        boxShadow: headerShadow,
+      ),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, top + 12, 20, 12),
+        child: Column(
+          children: [
+            _MeHeader(
+              name: name,
+              role: role,
+              initials: initials,
+              onSettings: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Settings coming soon")),
+                );
+              },
+            ),
+            const SizedBox(height: 14),
+            _BorrowReturnPills(
+              mode: mode,
+              onTapBorrowed: onTapBorrowed,
+              onTapReturned: onTapReturned,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _MeStickyHeaderDelegate oldDelegate) {
+    return extent != oldDelegate.extent ||
+        top != oldDelegate.top ||
+        name != oldDelegate.name ||
+        role != oldDelegate.role ||
+        initials != oldDelegate.initials ||
+        mode != oldDelegate.mode;
   }
 }
 
