@@ -19,15 +19,21 @@ class MePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final me = ref.watch(meProvider);
     final notifier = ref.read(meProvider.notifier);
-
     final userAsync = ref.watch(currentUserProvider);
 
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
 
     final top = MediaQuery.of(context).padding.top;
-    final safeBottom = MediaQuery.of(context).padding.bottom;
+    final safeBottom = MediaQuery.of(context).viewPadding.bottom;
     final compact = MediaQuery.sizeOf(context).width < 380;
+
+    // Estimate the height of the persistent bottom nav overlay.
+    // - Material 3 NavigationBar is ~80
+    // - BottomNavigationBar is 56
+    final navBarHeight = Theme.of(context).useMaterial3
+        ? 80.0
+        : kBottomNavigationBarHeight;
 
     final shadow = tokens.cardShadow.isNotEmpty
         ? [
@@ -45,9 +51,6 @@ class MePage extends ConsumerWidget {
       compact ? 14 : 16,
       compact ? 10 : 12,
     );
-
-    final bottomBarFootprint = btnHeight + btnPadding.vertical + safeBottom;
-    final listBottomSpacer = bottomBarFootprint + 12;
 
     final displayName = userAsync.maybeWhen(
       data: (u) => u.name,
@@ -121,16 +124,29 @@ class MePage extends ConsumerWidget {
         me.borrowed.isNotEmpty;
 
     final emojiBase = GoogleFonts.notoColorEmoji(height: 1);
-
     final listSide = compact ? 12.0 : 14.0;
+
+    // Space we must always keep so the bottom nav never covers the last item.
+    final baseBottomInset = navBarHeight + safeBottom + 14;
+
+    // Extra space needed when the floating Return button is visible.
+    final returnButtonFootprint =
+        btnHeight + btnPadding.vertical + 12; // + a little breathing room
+
+    final listBottomSpacer =
+        baseBottomInset + (showBottomReturn ? returnButtonFootprint : 0);
+
+    final bottomFadeHeight = listBottomSpacer + 34;
 
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Stack(
         children: [
           const Positioned.fill(child: DottedBackground()),
+
           Positioned.fill(
             child: CustomScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               slivers: [
                 SliverToBoxAdapter(
                   child: Padding(
@@ -147,6 +163,7 @@ class MePage extends ConsumerWidget {
                     ),
                   ),
                 ),
+
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
@@ -159,12 +176,16 @@ class MePage extends ConsumerWidget {
                     ),
                   ),
                 ),
+
                 if (rowsEmptyForMode)
                   SliverFillRemaining(
                     hasScrollBody: false,
-                    child: _EmptyMeState(
-                      title: emptyTitle,
-                      subtitle: emptySubtitle,
+                    child: Padding(
+                      padding: EdgeInsets.only(bottom: baseBottomInset),
+                      child: _EmptyMeState(
+                        title: emptyTitle,
+                        subtitle: emptySubtitle,
+                      ),
                     ),
                   )
                 else
@@ -230,15 +251,13 @@ class MePage extends ConsumerWidget {
                     ),
                   ),
 
-                SliverToBoxAdapter(
-                  child: SizedBox(
-                    height: showBottomReturn ? listBottomSpacer : 22,
-                  ),
-                ),
+                // ✅ Always add enough bottom spacer for the persistent nav bar.
+                SliverToBoxAdapter(child: SizedBox(height: listBottomSpacer)),
               ],
             ),
           ),
 
+          // Soft fade behind the floating return button (and also helps the nav overlay feel nicer).
           if (showBottomReturn)
             Positioned(
               left: 0,
@@ -246,7 +265,7 @@ class MePage extends ConsumerWidget {
               bottom: 0,
               child: IgnorePointer(
                 child: Container(
-                  height: bottomBarFootprint + 24,
+                  height: bottomFadeHeight,
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
@@ -261,18 +280,24 @@ class MePage extends ConsumerWidget {
               ),
             ),
 
+          // ✅ Float the action button ABOVE the persistent nav bar.
           if (showBottomReturn)
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: GlowingActionButton(
-                label: me.totalToReturn == 1
-                    ? "Return Items (1)"
-                    : "Return Items (${me.totalToReturn})",
-                icon: const Icon(Icons.keyboard_return_rounded),
-                loading: me.submitting,
-                onPressed: me.submitting ? null : onReturn,
-                padding: btnPadding,
-                height: btnHeight,
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: navBarHeight,
+              child: SafeArea(
+                top: false,
+                child: GlowingActionButton(
+                  label: me.totalToReturn == 1
+                      ? "Return Items (1)"
+                      : "Return Items (${me.totalToReturn})",
+                  icon: const Icon(Icons.keyboard_return_rounded),
+                  loading: me.submitting,
+                  onPressed: me.submitting ? null : onReturn,
+                  padding: btnPadding,
+                  height: btnHeight,
+                ),
               ),
             ),
         ],
@@ -663,7 +688,6 @@ class _BorrowedCard extends StatelessWidget {
             ],
           ),
           SizedBox(height: compact ? 10 : 12),
-
           _ReturnQtyStepperHold(
             value: item.quantity,
             max: item.maxQuantity,
@@ -848,7 +872,6 @@ class _ReturnQtyStepperHold extends StatelessWidget {
       child: Row(
         children: [
           const SizedBox(width: 6),
-
           HoldIconButton(
             enabled: canMinus,
             maxCount: max,
@@ -865,7 +888,6 @@ class _ReturnQtyStepperHold extends StatelessWidget {
                 ? (step) => onChanged(clampNext(value - step))
                 : null,
           ),
-
           const SizedBox(width: 6),
           Expanded(
             child: Center(
@@ -893,7 +915,6 @@ class _ReturnQtyStepperHold extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
-
           HoldIconButton(
             enabled: canPlus,
             maxCount: max,
@@ -910,7 +931,6 @@ class _ReturnQtyStepperHold extends StatelessWidget {
                 ? (step) => onChanged(clampNext(value + step))
                 : null,
           ),
-
           const SizedBox(width: 6),
         ],
       ),
