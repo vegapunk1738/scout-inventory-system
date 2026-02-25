@@ -68,6 +68,7 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -122,7 +123,7 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
         label: 'Open Bucket',
         icon: const Icon(Icons.search),
         onPressed: _openBucket,
-        respectKeyboardInset: true, 
+        respectKeyboardInset: false,
       ),
     );
   }
