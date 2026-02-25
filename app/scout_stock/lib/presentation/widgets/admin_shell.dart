@@ -149,7 +149,7 @@ class _AdminBottomNav extends StatelessWidget {
           layoutBuilder: (currentChild, previousChildren) {
             return Stack(
               alignment: Alignment.bottomCenter,
-              children: <Widget>[...previousChildren, if (currentChild != null) currentChild],
+              children: <Widget>[...previousChildren, ?currentChild],
             );
           },
           transitionBuilder: (child, animation) {

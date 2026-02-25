@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
 class DottedBackground extends StatelessWidget {
-  const DottedBackground();
+  const DottedBackground({super.key});
 
   @override
   Widget build(BuildContext context) {

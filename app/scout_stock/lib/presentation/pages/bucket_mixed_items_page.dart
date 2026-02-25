@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 
 import 'package:scout_stock/domain/models/item.dart';
 import 'package:scout_stock/router/app_routes.dart';
-import 'package:scout_stock/presentation/widgets/admin_shell.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
 import 'package:scout_stock/presentation/widgets/hold_icon_button.dart';
