@@ -23,4 +23,9 @@ class AppRoutes {
   static const String adminManage = '/a/manage';
   static const String adminActivity = '/a/activity';
   static const String adminUsers = '/a/users';
+
+  // Admin: user create/edit (above shell, no bottom nav)
+  static const String adminUserCreate = '/a/users/new';
+  static String adminUserEdit(String scoutId) =>
+      '/a/users/${Uri.encodeComponent(scoutId)}/edit';
 }

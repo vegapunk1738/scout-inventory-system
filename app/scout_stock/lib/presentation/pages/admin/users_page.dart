@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
+import 'package:scout_stock/router/app_routes.dart';
+import 'package:scout_stock/presentation/pages/admin/user_upsert_page.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
 enum MemberRole { scout, admin }
@@ -87,7 +90,41 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
                     child: _UsersHeader(
-                      onAdd: () => _showSnack("Create user coming soon"),
+                      onAdd: () async {
+                        final res = await context.push<Map<String, dynamic>>(
+                          AppRoutes.adminUserCreate,
+                        );
+                        if (!mounted || res == null) return;
+
+                        final id = (res['scoutId'] ?? '').toString();
+                        final name = (res['displayName'] ?? '').toString();
+                        final roleStr = (res['role'] ?? 'scout').toString();
+                        final role =
+                            roleStr == 'admin' ? MemberRole.admin : MemberRole.scout;
+
+                        // Prevent duplicates in the mock list.
+                        final exists = _seed.any((m) => m.id == id);
+                        if (exists) {
+                          _showSnack('User #$id already exists');
+                          return;
+                        }
+
+                        setState(() {
+                          _seed.add(TeamMember(id: id, name: name, role: role));
+                          _seed.sort(
+                            (a, b) => a.name
+                                .toLowerCase()
+                                .compareTo(b.name.toLowerCase()),
+                          );
+                        });
+
+                        final password = (res['password'] ?? '').toString();
+                        _showSnack(
+                          password.isEmpty
+                              ? 'Created $name (#$id)'
+                              : 'Created $name (#$id) • Password: $password',
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -188,8 +225,49 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
                                 member: m,
                                 expanded: _exp(m.id),
                                 radiusXl: tokens.radiusXl,
-                                onEdit: () =>
-                                    _showSnack("Edit profile coming soon"),
+                                onEdit: () async {
+                                      final res =
+                                          await context.push<Map<String, dynamic>>(
+                                        AppRoutes.adminUserEdit(m.id),
+                                        extra: UserUpsertArgs(
+                                          scoutId: m.id,
+                                          displayName: m.name,
+                                          role: m.role == MemberRole.admin
+                                              ? 'admin'
+                                              : 'scout',
+                                        ),
+                                      );
+
+                                      if (!mounted || res == null) return;
+
+                                      final name =
+                                          (res['displayName'] ?? m.name).toString();
+                                      final roleStr =
+                                          (res['role'] ?? (m.role == MemberRole.admin ? 'admin' : 'scout'))
+                                              .toString();
+                                      final role =
+                                          roleStr == 'admin' ? MemberRole.admin : MemberRole.scout;
+
+                                      setState(() {
+                                        final i = _seed.indexWhere((x) => x.id == m.id);
+                                        if (i != -1) {
+                                          _seed[i] = TeamMember(id: m.id, name: name, role: role);
+                                          _seed.sort(
+                                            (a, b) => a.name
+                                                .toLowerCase()
+                                                .compareTo(b.name.toLowerCase()),
+                                          );
+                                        }
+                                      });
+
+                                      final newPassword =
+                                          (res['newPassword'] ?? '').toString();
+                                      _showSnack(
+                                        newPassword.isEmpty
+                                            ? 'Updated $name (#${m.id})'
+                                            : 'Updated $name (#${m.id}) • New password set',
+                                      );
+                                    },
                                 onPromoteDemote: () => _showSnack(
                                   m.role == MemberRole.scout
                                       ? "Promote coming soon"

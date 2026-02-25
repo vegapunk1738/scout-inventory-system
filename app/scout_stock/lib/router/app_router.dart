@@ -5,6 +5,7 @@ import 'package:scout_stock/domain/models/app_user.dart';
 
 import 'package:scout_stock/presentation/pages/admin/activity_log_admin_page.dart';
 import 'package:scout_stock/presentation/pages/admin/users_page.dart';
+import 'package:scout_stock/presentation/pages/admin/user_upsert_page.dart';
 import 'package:scout_stock/presentation/pages/bucket_mixed_items_page.dart';
 import 'package:scout_stock/presentation/pages/bucket_single_item_page.dart';
 import 'package:scout_stock/presentation/pages/cart_page.dart';
@@ -135,6 +136,33 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           final raw = state.pathParameters['barcode'] ?? '';
           final barcode = Uri.decodeComponent(raw);
           return _BucketRouteDecider(barcode: barcode);
+        },
+      ),
+
+      
+      // Admin: user create/edit pages (above the shell, no bottom nav).
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: AppRoutes.adminUserCreate,
+        name: 'adminUserCreate',
+        builder: (context, state) => const UserUpsertPage(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/a/users/:id/edit',
+        name: 'adminUserEdit',
+        builder: (context, state) {
+          final id = state.pathParameters['id'] ?? '';
+          final extra = state.extra;
+          final args =
+              extra is UserUpsertArgs
+                  ? extra
+                  : UserUpsertArgs(
+                      scoutId: id,
+                      displayName: '',
+                      role: 'scout',
+                    );
+          return UserUpsertPage(editArgs: args);
         },
       ),
 
