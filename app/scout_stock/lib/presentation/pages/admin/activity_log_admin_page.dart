@@ -64,6 +64,7 @@ class FakeActivityApi {
         : _seed
               .where((t) {
                 if (t.personName.toLowerCase().contains(q)) return true;
+
                 final actionText = (t.action == ActivityAction.checkOut)
                     ? "checked out"
                     : "returned";
@@ -99,7 +100,6 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
   final _scrollCtrl = ScrollController();
 
   String _query = "";
-
   final FakeActivityApi _api = FakeActivityApi();
 
   static const int _pageSize = 10;
@@ -236,11 +236,18 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final emojiBase = GoogleFonts.notoColorEmoji(height: 1);
     final tokens = Theme.of(context).extension<AppTokens>()!;
+    final emojiBase = GoogleFonts.notoColorEmoji(height: 1);
+
     final mediaTop = MediaQuery.of(context).padding.top;
+    final safeBottom = MediaQuery.of(context).padding.bottom;
 
     final isEmpty = !_initialLoading && _loaded.isEmpty;
+
+    // Match AdminShell bottom nav footprint (height 78 + padding 12)
+    const navHeight = 78.0;
+    const navPad = 12.0;
+    final bottomFootprint = safeBottom + navHeight + navPad + 10;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -253,12 +260,11 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
               controller: _scrollCtrl,
               cacheExtent: 900,
               slivers: [
+                // ✅ Header matches Users page (title + ADMIN VIEW)
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
-                    child: ActivityLogHeader(
-                      controller: _searchCtrl,
-                      onChanged: _onSearchChanged,
+                    child: _ActivityHeader(
                       onFilter: () {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text("Filter coming soon")),
@@ -269,6 +275,22 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
                           const SnackBar(content: Text("Export coming soon")),
                         );
                       },
+                    ),
+                  ),
+                ),
+
+                // ✅ Sticky search (same size/style/position as Users page)
+                SliverPersistentHeader(
+                  pinned: true,
+                  delegate: _StickyHeaderDelegate(
+                    height: 70,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+                      child: _SearchCard(
+                        controller: _searchCtrl,
+                        hintText: 'Search SKU, user, or transaction…',
+                        onChanged: _onSearchChanged,
+                      ),
                     ),
                   ),
                 ),
@@ -290,7 +312,7 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
                   )
                 else
                   SliverPadding(
-                    padding: EdgeInsets.fromLTRB(16, 0, 16, 0),
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                     sliver: SliverList(
                       delegate: SliverChildBuilderDelegate(
                         (context, index) {
@@ -325,7 +347,7 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
 
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: EdgeInsets.fromLTRB(16, 6, 16, 6),
+                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -351,6 +373,9 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
                     ),
                   ),
                 ),
+
+                // bottom spacer (matches Users page footprint)
+                SliverToBoxAdapter(child: SizedBox(height: bottomFootprint)),
               ],
             ),
           ),
@@ -360,87 +385,198 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
   }
 }
 
-class ActivityLogHeader extends StatelessWidget {
-  const ActivityLogHeader({
-    super.key,
-    required this.controller,
-    required this.onChanged,
-    this.onFilter,
-    this.onExport,
-  });
+class _ActivityHeader extends StatelessWidget {
+  const _ActivityHeader({required this.onFilter, required this.onExport});
 
-  final TextEditingController controller;
-  final ValueChanged<String> onChanged;
-  final VoidCallback? onFilter;
-  final VoidCallback? onExport;
+  final VoidCallback onFilter;
+  final VoidCallback onExport;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
 
-    return Column(
+    Widget invisibleCircleButton({
+      required IconData icon,
+      required String tooltip,
+      required VoidCallback onPressed,
+    }) {
+      return Visibility(
+        visible: false, // ✅ invisible but keeps layout
+        maintainSize: true,
+        maintainAnimation: true,
+        maintainState: true,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: AppColors.primary,
+            shape: BoxShape.circle,
+            boxShadow: tokens.glowShadow,
+          ),
+          child: SizedBox(
+            width: 42,
+            height: 42,
+            child: IconButton(
+              onPressed: onPressed,
+              icon: Icon(icon, color: Colors.white),
+              splashRadius: 28,
+              tooltip: tooltip,
+              style: IconButton.styleFrom(
+                splashFactory: NoSplash.splashFactory,
+                hoverColor: Colors.transparent,
+                highlightColor: Colors.transparent,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Expanded(child: Text("Activity Log", style: t.headlineMedium)),
-            IconButton(
-              onPressed: onFilter ?? () {},
-              icon: const Icon(Icons.tune_rounded),
-              splashRadius: 22,
-            ),
-            IconButton(
-              onPressed: onExport ?? () {},
-              icon: const Icon(Icons.download_rounded),
-              splashRadius: 22,
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-
-        Container(
-          height: 56,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(tokens.radiusLg),
-            boxShadow: tokens.cardShadow,
-          ),
-          child: Row(
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(width: 16),
-              const Icon(Icons.search_rounded, color: AppColors.muted),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  onChanged: onChanged,
-                  textInputAction: TextInputAction.search,
-                  style: t.bodyLarge?.copyWith(
-                    color: AppColors.ink,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  decoration: InputDecoration(
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    filled: false,
-                    isDense: true,
-                    contentPadding: const EdgeInsets.only(right: 16),
-                    hintText: "Search SKU, user, or transaction...",
-                    hintStyle: t.bodyLarge?.copyWith(
-                      color: const Color(0xFFB9C0C8),
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
+              Text('Activity Log', style: t.titleLarge),
+              const SizedBox(height: 4),
+              Text(
+                'ADMIN VIEW',
+                style: t.labelMedium?.copyWith(
+                  color: AppColors.primary,
+                  letterSpacing: 1.8,
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(width: 10),
+        // ✅ Keep activity header buttons, but invisible
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            invisibleCircleButton(
+              icon: Icons.tune_rounded,
+              tooltip: 'Filter',
+              onPressed: onFilter,
+            ),
+            const SizedBox(width: 10),
+            invisibleCircleButton(
+              icon: Icons.download_rounded,
+              tooltip: 'Export',
+              onPressed: onExport,
+            ),
+          ],
+        ),
       ],
     );
+  }
+}
+
+class _SearchCard extends StatelessWidget {
+  const _SearchCard({
+    required this.controller,
+    required this.onChanged,
+    required this.hintText,
+  });
+
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  final String hintText;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final tokens = Theme.of(context).extension<AppTokens>()!;
+
+    return Theme(
+      data: Theme.of(context).copyWith(
+        hoverColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+      ),
+      child: Container(
+        height: 56,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(tokens.radiusLg),
+          boxShadow: tokens.cardShadow,
+        ),
+        child: Row(
+          children: [
+            const SizedBox(width: 16),
+            const Icon(Icons.search_rounded, color: AppColors.muted),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                controller: controller,
+                onChanged: onChanged,
+                textInputAction: TextInputAction.search,
+                style: t.bodyLarge?.copyWith(
+                  color: AppColors.ink,
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: InputDecoration(
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.only(right: 16),
+                  hintText: hintText,
+                  hintStyle: t.bodyLarge?.copyWith(
+                    color: const Color(0xFFB9C0C8),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            if (controller.text.isNotEmpty)
+              IconButton(
+                onPressed: () {
+                  controller.clear();
+                  onChanged('');
+                },
+                icon: const Icon(Icons.close_rounded),
+                splashRadius: 20,
+                tooltip: 'Clear',
+                style: IconButton.styleFrom(
+                  splashFactory: NoSplash.splashFactory,
+                  hoverColor: Colors.transparent,
+                  highlightColor: Colors.transparent,
+                ),
+              ),
+            const SizedBox(width: 6),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
+  _StickyHeaderDelegate({required this.height, required this.child});
+
+  final double height;
+  final Widget child;
+
+  @override
+  double get minExtent => height;
+
+  @override
+  double get maxExtent => height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return child;
+  }
+
+  @override
+  bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) {
+    return oldDelegate.height != height || oldDelegate.child != child;
   }
 }
 
@@ -451,6 +587,7 @@ class _EmptyActivityState extends StatelessWidget {
     required this.titleStyle,
     required this.bodyStyle,
   });
+
   final String query;
   final TextStyle emojiBase;
   final TextStyle? titleStyle;
@@ -641,6 +778,9 @@ class _ExpandableTxnCard extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: () => expanded.value = !expanded.value,
+            splashFactory: NoSplash.splashFactory,
+            hoverColor: Colors.transparent,
+            highlightColor: Colors.transparent,
             child: Column(
               children: [
                 Row(
