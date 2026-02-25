@@ -229,6 +229,7 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
         : 'Fill in the details to add a new team member.';
 
     return Scaffold(
+      resizeToAvoidBottomInset: false, 
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -452,7 +453,7 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
         icon: const Icon(Icons.check_rounded),
         onPressed: _saving ? null : _submit,
         loading: _saving,
-        respectKeyboardInset: true,
+        respectKeyboardInset: false,
       ),
     );
   }
