@@ -336,10 +336,10 @@ class _UsersHeader extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Team Members', style: t.headlineMedium),
+              Text('Team Members', style: t.titleLarge),
               const SizedBox(height: 4),
               Text(
-                'SCOUT OPS • ADMIN VIEW',
+                'ADMIN VIEW',
                 style: t.labelMedium?.copyWith(
                   color: AppColors.primary,
                   letterSpacing: 1.8,
@@ -356,8 +356,8 @@ class _UsersHeader extends StatelessWidget {
             boxShadow: tokens.glowShadow,
           ),
           child: SizedBox(
-            width: 56,
-            height: 56,
+            width: 31,
+            height: 31,
             child: IconButton(
               onPressed: onAdd,
               icon: const Icon(Icons.add_rounded, color: Colors.white),
