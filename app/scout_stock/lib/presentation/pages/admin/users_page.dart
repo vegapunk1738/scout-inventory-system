@@ -356,8 +356,8 @@ class _UsersHeader extends StatelessWidget {
             boxShadow: tokens.glowShadow,
           ),
           child: SizedBox(
-            width: 31,
-            height: 31,
+            width: 42,
+            height: 42,
             child: IconButton(
               onPressed: onAdd,
               icon: const Icon(Icons.add_rounded, color: Colors.white),
