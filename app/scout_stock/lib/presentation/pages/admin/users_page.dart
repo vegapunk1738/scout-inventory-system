@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/router/app_routes.dart';
 import 'package:scout_stock/presentation/pages/admin/user_upsert_page.dart';
@@ -52,6 +53,7 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
+    final emojiBase = GoogleFonts.notoColorEmoji(height: 1);
     final mediaTop = MediaQuery.of(context).padding.top;
     final safeBottom = MediaQuery.of(context).padding.bottom;
 
@@ -99,8 +101,9 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
                         final id = (res['scoutId'] ?? '').toString();
                         final name = (res['displayName'] ?? '').toString();
                         final roleStr = (res['role'] ?? 'scout').toString();
-                        final role =
-                            roleStr == 'admin' ? MemberRole.admin : MemberRole.scout;
+                        final role = roleStr == 'admin'
+                            ? MemberRole.admin
+                            : MemberRole.scout;
 
                         // Prevent duplicates in the mock list.
                         final exists = _seed.any((m) => m.id == id);
@@ -112,9 +115,9 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
                         setState(() {
                           _seed.add(TeamMember(id: id, name: name, role: role));
                           _seed.sort(
-                            (a, b) => a.name
-                                .toLowerCase()
-                                .compareTo(b.name.toLowerCase()),
+                            (a, b) => a.name.toLowerCase().compareTo(
+                              b.name.toLowerCase(),
+                            ),
                           );
                         });
 
@@ -182,28 +185,25 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
                 if (isEmpty)
                   SliverFillRemaining(
                     hasScrollBody: false,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 40, 20, 0),
-                      child: Center(
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 40, 20, 0),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
-                              Icons.group_off_rounded,
-                              size: 44,
-                              color: AppColors.muted.withValues(alpha: 0.75),
-                            ),
+                            Text('🫂', style: emojiBase.copyWith(fontSize: 54)),
                             const SizedBox(height: 10),
                             Text(
                               'No users found',
-                              style: t.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w900,
-                              ),
+                              style: t.titleLarge,
+                              textAlign: TextAlign.center,
                             ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 8),
                             Text(
-                              'Try a different name or ID.',
-                              style: t.bodyMedium,
+                              'Try a different name or Scout ID',
+                              style: t.bodyLarge?.copyWith(
+                                color: AppColors.muted,
+                              ),
                               textAlign: TextAlign.center,
                             ),
                           ],
@@ -226,8 +226,8 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
                                 expanded: _exp(m.id),
                                 radiusXl: tokens.radiusXl,
                                 onEdit: () async {
-                                      final res =
-                                          await context.push<Map<String, dynamic>>(
+                                  final res = await context
+                                      .push<Map<String, dynamic>>(
                                         AppRoutes.adminUserEdit(m.id),
                                         extra: UserUpsertArgs(
                                           scoutId: m.id,
@@ -238,36 +238,46 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
                                         ),
                                       );
 
-                                      if (!mounted || res == null) return;
+                                  if (!mounted || res == null) return;
 
-                                      final name =
-                                          (res['displayName'] ?? m.name).toString();
-                                      final roleStr =
-                                          (res['role'] ?? (m.role == MemberRole.admin ? 'admin' : 'scout'))
-                                              .toString();
-                                      final role =
-                                          roleStr == 'admin' ? MemberRole.admin : MemberRole.scout;
+                                  final name = (res['displayName'] ?? m.name)
+                                      .toString();
+                                  final roleStr =
+                                      (res['role'] ??
+                                              (m.role == MemberRole.admin
+                                                  ? 'admin'
+                                                  : 'scout'))
+                                          .toString();
+                                  final role = roleStr == 'admin'
+                                      ? MemberRole.admin
+                                      : MemberRole.scout;
 
-                                      setState(() {
-                                        final i = _seed.indexWhere((x) => x.id == m.id);
-                                        if (i != -1) {
-                                          _seed[i] = TeamMember(id: m.id, name: name, role: role);
-                                          _seed.sort(
-                                            (a, b) => a.name
-                                                .toLowerCase()
-                                                .compareTo(b.name.toLowerCase()),
-                                          );
-                                        }
-                                      });
-
-                                      final newPassword =
-                                          (res['newPassword'] ?? '').toString();
-                                      _showSnack(
-                                        newPassword.isEmpty
-                                            ? 'Updated $name (#${m.id})'
-                                            : 'Updated $name (#${m.id}) • New password set',
+                                  setState(() {
+                                    final i = _seed.indexWhere(
+                                      (x) => x.id == m.id,
+                                    );
+                                    if (i != -1) {
+                                      _seed[i] = TeamMember(
+                                        id: m.id,
+                                        name: name,
+                                        role: role,
                                       );
-                                    },
+                                      _seed.sort(
+                                        (a, b) => a.name
+                                            .toLowerCase()
+                                            .compareTo(b.name.toLowerCase()),
+                                      );
+                                    }
+                                  });
+
+                                  final newPassword = (res['newPassword'] ?? '')
+                                      .toString();
+                                  _showSnack(
+                                    newPassword.isEmpty
+                                        ? 'Updated $name (#${m.id})'
+                                        : 'Updated $name (#${m.id}) • New password set',
+                                  );
+                                },
                                 onPromoteDemote: () => _showSnack(
                                   m.role == MemberRole.scout
                                       ? "Promote coming soon"

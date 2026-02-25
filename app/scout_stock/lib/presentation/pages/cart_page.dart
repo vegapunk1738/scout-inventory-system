@@ -442,7 +442,11 @@ class _TrashPillButton extends StatelessWidget {
 }
 
 class _EmptyCart extends StatelessWidget {
-  const _EmptyCart({required this.emojiBase, this.titleStyle, this.bodyStyle});
+  const _EmptyCart({
+    required this.emojiBase,
+    required this.titleStyle,
+    required this.bodyStyle,
+  });
 
   final TextStyle emojiBase;
   final TextStyle? titleStyle;

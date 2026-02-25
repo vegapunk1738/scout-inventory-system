@@ -60,19 +60,23 @@ class MePage extends ConsumerWidget {
 
     String emptyTitle = "Nothing here yet";
     String emptySubtitle =
-        "Checked out and returned items will show up on this page.";
+        "Checked out and returned items will show up on this page";
+    String emptyEmoji = "📦";
 
     if (!me.hasAny) {
       emptyTitle = "Nothing here yet";
       emptySubtitle =
-          "Checked out and returned items will show up on this page.";
+          "Checked out and returned items will show up on this page";
+      emptyEmoji = "📦";
     } else if (me.mode == MeFilterMode.borrowedOnly && me.borrowed.isEmpty) {
       emptyTitle = "No borrowed items";
-      emptySubtitle = "When you check out gear, it will appear here.";
+      emptySubtitle = "When you check out gear, it will appear here";
+      emptyEmoji = "📤";
     } else if (me.mode == MeFilterMode.returnedOnly && me.returned.isEmpty) {
       emptyTitle = "No returns yet";
       emptySubtitle =
-          "Returned items will show up here once you bring them back.";
+          "Returned items will show up here once you bring them back";
+      emptyEmoji = "📥";
     }
 
     Future<void> onReturn() async {
@@ -161,8 +165,14 @@ class MePage extends ConsumerWidget {
                     child: Padding(
                       padding: EdgeInsets.only(bottom: safeBottom + 14),
                       child: _EmptyMeState(
-                        title: emptyTitle,
-                        subtitle: emptySubtitle,
+                        emptyTitle: emptyTitle,
+                        emptySubtitle: emptySubtitle,
+                        emptyEmoji: emptyEmoji,
+                        emojiBase: emojiBase,
+                        titleStyle: t.titleLarge,
+                        bodyStyle: t.bodyLarge?.copyWith(
+                          color: AppColors.muted,
+                        ),
                       ),
                     ),
                   )
@@ -1055,43 +1065,41 @@ class _ReturnedQtyBar extends StatelessWidget {
 }
 
 class _EmptyMeState extends StatelessWidget {
-  const _EmptyMeState({required this.title, required this.subtitle});
-  final String title;
-  final String subtitle;
+  const _EmptyMeState({
+    required this.emptyTitle,
+    required this.emptySubtitle,
+    required this.emptyEmoji,
+    required this.emojiBase,
+    required this.titleStyle,
+    required this.bodyStyle,
+  });
+
+  final String emptyTitle;
+  final String emptySubtitle;
+  final String emptyEmoji;
+  final TextStyle emojiBase;
+  final TextStyle? titleStyle;
+  final TextStyle? bodyStyle;
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
     return Center(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 10, 24, 24),
+        padding: const EdgeInsets.symmetric(horizontal: 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: AppColors.outline),
-              ),
-              child: const Icon(
-                Icons.inventory_2_outlined,
-                color: AppColors.muted,
-                size: 28,
-              ),
-            ),
-            const SizedBox(height: 14),
+            Text(emptyEmoji, style: emojiBase.copyWith(fontSize: 54)),
+            const SizedBox(height: 10),
             Text(
-              title,
-              style: t.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+              emptyTitle,
+              style: titleStyle,
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Text(
-              subtitle,
-              style: t.bodyMedium?.copyWith(color: AppColors.muted),
+              emptySubtitle,
+              style: bodyStyle,
               textAlign: TextAlign.center,
             ),
           ],

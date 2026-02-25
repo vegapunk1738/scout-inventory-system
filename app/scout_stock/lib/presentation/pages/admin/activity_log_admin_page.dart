@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
@@ -234,6 +235,8 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
 
   @override
   Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final emojiBase = GoogleFonts.notoColorEmoji(height: 1);
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final mediaTop = MediaQuery.of(context).padding.top;
 
@@ -278,7 +281,12 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
                 else if (isEmpty)
                   SliverFillRemaining(
                     hasScrollBody: false,
-                    child: _EmptyActivityState(query: _query),
+                    child: _EmptyActivityState(
+                      query: _query,
+                      emojiBase: emojiBase,
+                      titleStyle: t.titleLarge,
+                      bodyStyle: t.bodyLarge?.copyWith(color: AppColors.muted),
+                    ),
                   )
                 else
                   SliverPadding(
@@ -437,50 +445,35 @@ class ActivityLogHeader extends StatelessWidget {
 }
 
 class _EmptyActivityState extends StatelessWidget {
-  const _EmptyActivityState({required this.query});
+  const _EmptyActivityState({
+    required this.query,
+    required this.emojiBase,
+    required this.titleStyle,
+    required this.bodyStyle,
+  });
   final String query;
+  final TextStyle emojiBase;
+  final TextStyle? titleStyle;
+  final TextStyle? bodyStyle;
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-
     final title = query.isEmpty ? "No activity yet" : "No results";
     final subtitle = query.isEmpty
-        ? "When scouts check out or return items,\nyou’ll see it here."
-        : "Try a different keyword.";
+        ? "When scouts check out or return items,\nyou’ll see it here"
+        : "Try a different keyword";
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 30, 24, 24),
-      child: Center(
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: AppColors.outline),
-              ),
-              child: const Icon(
-                Icons.history_rounded,
-                color: AppColors.muted,
-                size: 28,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              title,
-              style: t.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              subtitle,
-              style: t.bodyMedium?.copyWith(color: AppColors.muted),
-              textAlign: TextAlign.center,
-            ),
+            Text('📜', style: emojiBase.copyWith(fontSize: 54)),
+            const SizedBox(height: 10),
+            Text(title, style: titleStyle, textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Text(subtitle, style: bodyStyle, textAlign: TextAlign.center),
           ],
         ),
       ),
