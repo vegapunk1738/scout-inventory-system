@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:scout_stock/domain/models/app_user.dart';
 
 import 'package:scout_stock/presentation/pages/admin/activity_log_admin_page.dart';
+import 'package:scout_stock/presentation/pages/admin/bucket_management_admin_page.dart';
 import 'package:scout_stock/presentation/pages/admin/users_page.dart';
 import 'package:scout_stock/presentation/pages/admin/user_upsert_page.dart';
 import 'package:scout_stock/presentation/pages/bucket_mixed_items_page.dart';
@@ -210,8 +211,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: AppRoutes.adminManage,
                 name: 'adminManage',
-                builder: (context, state) =>
-                    const _PlaceholderPage(title: 'Manage'),
+                builder: (context, state) => const BucketManagementAdminPage(),
               ),
             ],
           ),
