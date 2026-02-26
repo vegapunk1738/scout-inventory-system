@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
@@ -16,7 +19,7 @@ class BucketSummary {
     this.tags = const [],
   });
 
-  /// Human-readable bucket ID (e.g. BKT-042).
+  /// Human-readable bucket ID (e.g. SSB-BKT-042).
   final String id;
 
   final String name;
@@ -43,8 +46,16 @@ class BucketManagementAdminPage extends StatefulWidget {
 }
 
 class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
+  static final PdfPageFormat _labelFormat = PdfPageFormat(
+    4 * PdfPageFormat.inch,
+    2 * PdfPageFormat.inch,
+    marginAll: 0,
+  );
+
   final _searchCtrl = TextEditingController();
-  String _query = "";
+  String _query = '';
+
+  bool _printing = false;
 
   late final List<BucketSummary> _seed = List<BucketSummary>.of(_mockBuckets())
     ..sort((a, b) => b.lastActivityAt.compareTo(a.lastActivityAt));
@@ -56,6 +67,7 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
   }
 
   void _showSnack(String msg) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
@@ -90,6 +102,88 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
 
     setState(() => _seed.removeWhere((x) => x.id == b.id));
     _showSnack('Deleted ${b.name} (#${b.id})');
+  }
+
+  Future<void> _printBucketLabel(BucketSummary bucket) async {
+    if (_printing) return;
+
+    final id = bucket.id.trim();
+    String _safeFileName(String s) {
+      final cleaned = s.trim().replaceAll(RegExp(r'[\\/:*?"<>|]+'), ' ');
+      return cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
+    }
+
+    setState(() => _printing = true);
+    try {
+      await Printing.layoutPdf(
+        name: _safeFileName(bucket.name),
+        format: _labelFormat,
+        onLayout: (format) async {
+          final doc = pw.Document();
+
+          // Compute a barcode height that always fits.
+          // (Keeps the ID line visible even on 2" tall labels.)
+          final barcodeH =
+              (format.height - 78) // reserve space for texts + padding
+                  .clamp(44.0, 66.0)
+                  .toDouble();
+
+          doc.addPage(
+            pw.Page(
+              pageFormat: format,
+              build: (_) {
+                return pw.Container(
+                  color: PdfColors.white,
+                  padding: const pw.EdgeInsets.fromLTRB(12, 10, 12, 10),
+                  child: pw.Column(
+                    mainAxisSize: pw.MainAxisSize.min,
+                    crossAxisAlignment: pw.CrossAxisAlignment.center,
+                    children: [
+                      pw.FittedBox(
+                        fit: pw.BoxFit.scaleDown,
+                        child: pw.Text(
+                          bucket.name,
+                          style: pw.TextStyle(
+                            fontSize: 12,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      pw.SizedBox(height: 6),
+                      pw.BarcodeWidget(
+                        barcode: pw.Barcode.code128(),
+                        data: id,
+                        drawText: false,
+                        width: double.infinity,
+                        height: barcodeH,
+                      ),
+                      pw.SizedBox(height: 6),
+                      pw.FittedBox(
+                        fit: pw.BoxFit.scaleDown,
+                        child: pw.Text(
+                          id,
+                          textAlign: pw.TextAlign.center,
+                          style: pw.TextStyle(
+                            fontSize: 13,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          );
+
+          return doc.save();
+        },
+      );
+    } catch (_) {
+      _showSnack('Could not print label for ${bucket.id}');
+    } finally {
+      if (mounted) setState(() => _printing = false);
+    }
   }
 
   @override
@@ -136,9 +230,7 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
                     child: _ManageHeader(
-                      onAdd: () {
-                        _showSnack('New bucket flow coming soon');
-                      },
+                      onAdd: () => _showSnack('New bucket flow coming soon'),
                     ),
                   ),
                 ),
@@ -208,9 +300,7 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
                               onEdit: () => _showSnack(
                                 'Edit ${b.name} (#${b.id}) — coming soon',
                               ),
-                              onPrint: () => _showSnack(
-                                'Print label for ${b.name} (#${b.id}) — coming soon',
-                              ),
+                              onPrint: () => _printBucketLabel(b),
                               onDelete: () => _confirmDelete(b),
                             ),
                           ),
@@ -223,6 +313,46 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
               ],
             ),
           ),
+
+          // Small UX safety: block double-taps while print dialog is preparing.
+          if (_printing)
+            Positioned.fill(
+              child: IgnorePointer(
+                ignoring: false,
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  alignment: Alignment.center,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(tokens.radiusLg),
+                      boxShadow: tokens.cardShadow,
+                      border: Border.all(color: AppColors.outline),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2.4),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Preparing label…',
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -259,7 +389,7 @@ class _ManageHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 10),
-        // ✅ Match Users page "New" button (not the design mock)
+        // Match Users page circular "New" button (not the design mock)
         DecoratedBox(
           decoration: BoxDecoration(
             color: AppColors.primary,
@@ -480,13 +610,13 @@ class _StockPill extends StatelessWidget {
         bg = AppColors.warningBg;
         border = const Color(0xFFFBD38D);
         fg = const Color(0xFF8A5B00);
-        text = 'In use';
+        text = 'In Use';
         break;
       case BucketStockState.outOfStock:
         bg = const Color(0xFFFFE8E8);
         border = const Color(0xFFFECACA);
         fg = const Color(0xFFB42318);
-        text = 'Out of stock';
+        text = 'Out of Stock';
         break;
     }
 
@@ -649,7 +779,6 @@ String _formatRelative(DateTime dt) {
   if (d.inHours < 24) return '${d.inHours}h ago';
   if (d.inDays < 7) return '${d.inDays}d ago';
 
-  // For older entries keep it simple & short.
   final weeks = (d.inDays / 7).floor();
   if (weeks < 5) return '${weeks}w ago';
 
