@@ -28,4 +28,9 @@ class AppRoutes {
   static const String adminUserCreate = '/a/users/new';
   static String adminUserEdit(String scoutId) =>
       '/a/users/${Uri.encodeComponent(scoutId)}/edit';
+
+  // Admin: bucket create/edit (above shell, no bottom nav)
+  static const String adminBucketCreate = '/a/manage/buckets/new';
+  static String adminBucketEdit(String bucketBarcode) =>
+      '/a/manage/buckets/${Uri.encodeComponent(bucketBarcode)}/edit';
 }

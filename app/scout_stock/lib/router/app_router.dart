@@ -7,6 +7,7 @@ import 'package:scout_stock/presentation/pages/admin/activity_log_admin_page.dar
 import 'package:scout_stock/presentation/pages/admin/bucket_management_admin_page.dart';
 import 'package:scout_stock/presentation/pages/admin/users_page.dart';
 import 'package:scout_stock/presentation/pages/admin/user_upsert_page.dart';
+import 'package:scout_stock/presentation/pages/admin/bucket_upsert_page.dart';
 import 'package:scout_stock/presentation/pages/bucket_mixed_items_page.dart';
 import 'package:scout_stock/presentation/pages/bucket_single_item_page.dart';
 import 'package:scout_stock/presentation/pages/cart_page.dart';
@@ -140,7 +141,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
 
-      
       // Admin: user create/edit pages (above the shell, no bottom nav).
       GoRoute(
         parentNavigatorKey: _rootNavKey,
@@ -155,15 +155,36 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           final id = state.pathParameters['id'] ?? '';
           final extra = state.extra;
-          final args =
-              extra is UserUpsertArgs
-                  ? extra
-                  : UserUpsertArgs(
-                      scoutId: id,
-                      displayName: '',
-                      role: 'scout',
-                    );
+          final args = extra is UserUpsertArgs
+              ? extra
+              : UserUpsertArgs(scoutId: id, displayName: '', role: 'scout');
           return UserUpsertPage(editArgs: args);
+        },
+      ),
+
+      // Admin: bucket create/edit pages (above the shell, no bottom nav).
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: AppRoutes.adminBucketCreate,
+        name: 'adminBucketCreate',
+        builder: (context, state) => const BucketUpsertPage(),
+      ),
+      GoRoute(
+        parentNavigatorKey: _rootNavKey,
+        path: '/a/manage/buckets/:id/edit',
+        name: 'adminBucketEdit',
+        builder: (context, state) {
+          final id = state.pathParameters['id'] ?? '';
+          final extra = state.extra;
+          final args = extra is BucketUpsertArgs
+              ? extra
+              : BucketUpsertArgs(
+                  barcode: id,
+                  name: '',
+                  emoji: '🪣',
+                  contents: const [],
+                );
+          return BucketUpsertPage(editArgs: args);
         },
       ),
 

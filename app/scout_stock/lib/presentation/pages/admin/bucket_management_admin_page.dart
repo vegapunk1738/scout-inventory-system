@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/theme/app_theme.dart';
+import 'package:scout_stock/router/app_routes.dart';
+import 'package:scout_stock/presentation/pages/admin/bucket_upsert_page.dart';
 
 enum BucketStockState { fullyStocked, inUse, outOfStock }
 
@@ -71,6 +74,81 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
+
+  Future<void> _openCreateBucket() async {
+    final res = await context.push<Map<String, dynamic>>(AppRoutes.adminBucketCreate);
+    if (!mounted) return;
+    if (res == null) return;
+
+    final contents = (res['contents'] as List?) ?? const [];
+    final now = DateTime.now();
+
+    setState(() {
+      _seed.insert(
+        0,
+        BucketSummary(
+          id: (res['barcode'] as String?) ?? 'SSB---000',
+          name: (res['name'] as String?) ?? 'New Bucket',
+          itemTypeCount: contents.length,
+          lastActivityAt: now,
+          state: contents.isEmpty ? BucketStockState.outOfStock : BucketStockState.fullyStocked,
+          contentsPreview: contents
+              .map((e) => (e as Map)['name']?.toString() ?? '')
+              .where((s) => s.trim().isNotEmpty)
+              .take(3)
+              .toList(),
+        ),
+      );
+    });
+
+    _showSnack('Created ${(res['name'] as String?) ?? 'bucket'}');
+  }
+
+  Future<void> _openEditBucket(BucketSummary b) async {
+    final seeds = b.contentsPreview
+        .map((n) => BucketContentSeed(name: n, emoji: '📦', quantity: 1))
+        .toList();
+
+    final args = BucketUpsertArgs(
+      barcode: b.id,
+      name: b.name,
+      emoji: '🪣',
+      contents: seeds,
+    );
+
+    final res = await context.push<Map<String, dynamic>>(
+      AppRoutes.adminBucketEdit(b.id),
+      extra: args,
+    );
+
+    if (!mounted) return;
+    if (res == null) return;
+
+    final contents = (res['contents'] as List?) ?? const [];
+    final now = DateTime.now();
+
+    setState(() {
+      final idx = _seed.indexWhere((x) => x.id == b.id);
+      if (idx == -1) return;
+
+      _seed[idx] = BucketSummary(
+        id: (res['barcode'] as String?) ?? b.id,
+        name: (res['name'] as String?) ?? b.name,
+        itemTypeCount: contents.length,
+        lastActivityAt: now,
+        state: contents.isEmpty ? BucketStockState.outOfStock : BucketStockState.fullyStocked,
+        tags: _seed[idx].tags,
+        contentsPreview: contents
+            .map((e) => (e as Map)['name']?.toString() ?? '')
+            .where((s) => s.trim().isNotEmpty)
+            .take(3)
+            .toList(),
+      );
+    });
+
+    _showSnack('Saved ${(res['name'] as String?) ?? b.name}');
+  }
+
   Future<void> _confirmDelete(BucketSummary b) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -108,7 +186,7 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
     if (_printing) return;
 
     final id = bucket.id.trim();
-    String _safeFileName(String s) {
+    String safeFileName(String s) {
       final cleaned = s.trim().replaceAll(RegExp(r'[\\/:*?"<>|]+'), ' ');
       return cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
     }
@@ -116,7 +194,7 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
     setState(() => _printing = true);
     try {
       await Printing.layoutPdf(
-        name: _safeFileName(bucket.name),
+        name: safeFileName(bucket.name),
         format: _labelFormat,
         onLayout: (format) async {
           final doc = pw.Document();
@@ -230,7 +308,7 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
                     child: _ManageHeader(
-                      onAdd: () => _showSnack('New bucket flow coming soon'),
+                      onAdd: _openCreateBucket,
                     ),
                   ),
                 ),
@@ -297,9 +375,7 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
                             child: _BucketCard(
                               bucket: b,
                               radiusXl: tokens.radiusXl,
-                              onEdit: () => _showSnack(
-                                'Edit ${b.name} (#${b.id}) — coming soon',
-                              ),
+                              onEdit: () => _openEditBucket(b),
                               onPrint: () => _printBucketLabel(b),
                               onDelete: () => _confirmDelete(b),
                             ),
