@@ -69,11 +69,6 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
     super.dispose();
   }
 
-  void _showSnack(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
-
 
   Future<void> _openCreateBucket() async {
     final res = await context.push<Map<String, dynamic>>(AppRoutes.adminBucketCreate);
@@ -100,8 +95,6 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
         ),
       );
     });
-
-    _showSnack('Created ${(res['name'] as String?) ?? 'bucket'}');
   }
 
   Future<void> _openEditBucket(BucketSummary b) async {
@@ -145,8 +138,6 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
             .toList(),
       );
     });
-
-    _showSnack('Saved ${(res['name'] as String?) ?? b.name}');
   }
 
   Future<void> _confirmDelete(BucketSummary b) async {
@@ -179,7 +170,6 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
     if (ok != true) return;
 
     setState(() => _seed.removeWhere((x) => x.id == b.id));
-    _showSnack('Deleted ${b.name} (#${b.id})');
   }
 
   Future<void> _printBucketLabel(BucketSummary bucket) async {
@@ -258,7 +248,7 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
         },
       );
     } catch (_) {
-      _showSnack('Could not print label for ${bucket.id}');
+      debugPrint('Could not print label for ${bucket.id}');
     } finally {
       if (mounted) setState(() => _printing = false);
     }

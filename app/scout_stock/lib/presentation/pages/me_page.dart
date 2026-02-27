@@ -352,11 +352,7 @@ class _MeStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
               name: name,
               role: role,
               initials: initials,
-              onSettings: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Settings coming soon")),
-                );
-              },
+              onSettings: () {},
             ),
             const SizedBox(height: 14),
             _BorrowReturnPills(

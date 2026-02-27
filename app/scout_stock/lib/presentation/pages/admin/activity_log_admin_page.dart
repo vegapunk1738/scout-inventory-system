@@ -265,16 +265,8 @@ class _ActivityLogPageState extends State<ActivityLogPage> {
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
                     child: _ActivityHeader(
-                      onFilter: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Filter coming soon")),
-                        );
-                      },
-                      onExport: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Export coming soon")),
-                        );
-                      },
+                      onFilter: () {},
+                      onExport: () {},
                     ),
                   ),
                 ),

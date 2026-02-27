@@ -45,10 +45,6 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
     super.dispose();
   }
 
-  void _showSnack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
-
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
@@ -108,7 +104,6 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
                         // Prevent duplicates in the mock list.
                         final exists = _seed.any((m) => m.id == id);
                         if (exists) {
-                          _showSnack('User #$id already exists');
                           return;
                         }
 
@@ -120,13 +115,6 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
                             ),
                           );
                         });
-
-                        final password = (res['password'] ?? '').toString();
-                        _showSnack(
-                          password.isEmpty
-                              ? 'Created $name (#$id)'
-                              : 'Created $name (#$id) • Password: $password',
-                        );
                       },
                     ),
                   ),
@@ -269,20 +257,8 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
                                       );
                                     }
                                   });
-
-                                  final newPassword = (res['newPassword'] ?? '')
-                                      .toString();
-                                  _showSnack(
-                                    newPassword.isEmpty
-                                        ? 'Updated $name (#${m.id})'
-                                        : 'Updated $name (#${m.id}) • New password set',
-                                  );
                                 },
-                                onPromoteDemote: () => _showSnack(
-                                  m.role == MemberRole.scout
-                                      ? "Promote coming soon"
-                                      : "Demote coming soon",
-                                ),
+                                onPromoteDemote: () {},
                               ),
                             ),
                           );
