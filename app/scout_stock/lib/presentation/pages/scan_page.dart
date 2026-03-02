@@ -324,6 +324,10 @@ class _ScanPageState extends State<ScanPage>
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final safe = MediaQuery.paddingOf(context);
+    // Full physical screen height — used to make the camera feed bleed
+    // edge-to-edge behind the status bar, notch, home indicator, and the
+    // outer shell's navigation bar.
+    final screenH = MediaQuery.sizeOf(context).height;
 
     final allowBlur = !kIsWeb;
     final showOverlays = _isActive && _uiReady;
@@ -387,16 +391,15 @@ class _ScanPageState extends State<ScanPage>
             fit: StackFit.expand,
             children: [
               // Camera: bleeds edge-to-edge across the full physical screen.
-              // top: -safe.top extends behind the status bar/notch.
-              // bottom: -safe.bottom extends behind the home indicator and nav bar gap.
-              // No fixed height — it stretches to exactly cover both safe-area edges,
-              // which is more reliable than screenH on Safari where the visual
-              // viewport height can vary with the browser chrome visibility.
+              // The body is constrained by the outer shell's nav bar, so we
+              // offset upward by safe.top (status-bar height) and give it the
+              // full screenH so it extends behind the nav bar and home indicator.
+              // Positioned must be a direct child of Stack — RepaintBoundary goes inside.
               Positioned(
                 top: -safe.top,
                 left: 0,
                 right: 0,
-                bottom: -safe.bottom,
+                height: screenH,
                 child: RepaintBoundary(
                   child: MobileScanner(
                     controller: _controller,
@@ -410,7 +413,7 @@ class _ScanPageState extends State<ScanPage>
                   top: -safe.top,
                   left: 0,
                   right: 0,
-                  bottom: -safe.bottom,
+                  height: screenH,
                   child: const ColoredBox(color: Colors.black),
                 ),
 
@@ -418,7 +421,7 @@ class _ScanPageState extends State<ScanPage>
                 top: -safe.top,
                 left: 0,
                 right: 0,
-                bottom: -safe.bottom,
+                height: screenH,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -441,7 +444,7 @@ class _ScanPageState extends State<ScanPage>
                   top: -safe.top,
                   left: 0,
                   right: 0,
-                  bottom: -safe.bottom,
+                  height: screenH,
                   child: IgnorePointer(
                     ignoring: true,
                     child: AnimatedBuilder(
