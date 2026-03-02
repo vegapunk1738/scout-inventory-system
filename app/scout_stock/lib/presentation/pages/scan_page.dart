@@ -323,11 +323,6 @@ class _ScanPageState extends State<ScanPage>
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
-    // viewPadding = real physical safe-area insets, never zeroed by scaffolds.
-    // Use this for full-bleed layers that must break outside layout constraints.
-    final viewPadding = MediaQuery.viewPaddingOf(context);
-
-    // padding = scaffold-adjusted insets for UI element positioning.
     final safe = MediaQuery.paddingOf(context);
 
     final allowBlur = !kIsWeb;
@@ -391,12 +386,17 @@ class _ScanPageState extends State<ScanPage>
           return Stack(
             fit: StackFit.expand,
             children: [
+              // Camera: bleeds edge-to-edge across the full physical screen.
+              // top: -safe.top extends behind the status bar/notch.
+              // bottom: -safe.bottom extends behind the home indicator and nav bar gap.
+              // No fixed height — it stretches to exactly cover both safe-area edges,
+              // which is more reliable than screenH on Safari where the visual
               // viewport height can vary with the browser chrome visibility.
               Positioned(
-                top: -viewPadding.top,
+                top: -safe.top,
                 left: 0,
                 right: 0,
-                bottom: -viewPadding.bottom,
+                bottom: -safe.bottom,
                 child: RepaintBoundary(
                   child: MobileScanner(
                     controller: _controller,
@@ -407,18 +407,18 @@ class _ScanPageState extends State<ScanPage>
 
               if (!_isActive)
                 Positioned(
-                  top: -viewPadding.top,
+                  top: -safe.top,
                   left: 0,
                   right: 0,
-                  bottom: -viewPadding.bottom,
+                  bottom: -safe.bottom,
                   child: const ColoredBox(color: Colors.black),
                 ),
 
               Positioned(
-                top: -viewPadding.top,
+                top: -safe.top,
                 left: 0,
                 right: 0,
-                bottom: -viewPadding.bottom,
+                bottom: -safe.bottom,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -438,10 +438,10 @@ class _ScanPageState extends State<ScanPage>
 
               if (_isActive)
                 Positioned(
-                  top: -viewPadding.top,
+                  top: -safe.top,
                   left: 0,
                   right: 0,
-                  bottom: -viewPadding.bottom,
+                  bottom: -safe.bottom,
                   child: IgnorePointer(
                     ignoring: true,
                     child: AnimatedBuilder(

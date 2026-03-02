@@ -46,36 +46,6 @@
   <title>Scout Stock</title>
   <link rel="manifest" href="manifest.json">
 
-  <script>
-    // Flutter Web replaces the <meta name="viewport"> tag at startup, stripping
-    // our viewport-fit=cover. We use a MutationObserver to detect when Flutter
-    // writes its own tag and immediately add viewport-fit=cover back to it.
-    // This script runs before flutter_bootstrap.js so the observer is in place
-    // before Flutter touches the DOM.
-    (function () {
-      function ensureViewportFitCover() {
-        const meta = document.querySelector('meta[name="viewport"]');
-        if (!meta) return;
-        const content = meta.getAttribute('content') || '';
-        if (!content.includes('viewport-fit=cover')) {
-          meta.setAttribute('content', content + ', viewport-fit=cover');
-        }
-      }
-
-      // Apply immediately in case our original tag survives Flutter's pass.
-      ensureViewportFitCover();
-
-      // Watch for Flutter adding or mutating any viewport tag.
-      const observer = new MutationObserver(ensureViewportFitCover);
-      observer.observe(document.head, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['content'],
-      });
-    })();
-  </script>
-
   <style>
     /* Match Flutter's AppColors.background so the browser chrome areas
        (status bar, home indicator strip) are never white — they blend
