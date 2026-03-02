@@ -47,20 +47,31 @@
   <link rel="manifest" href="manifest.json">
 
   <style>
-    /* Match Flutter's AppColors.background so the browser chrome areas
-       (status bar, home indicator strip) are never white — they blend
-       seamlessly with the app canvas. */
+    /*
+      Black background so the safe-area inset zones (behind notch / home
+      indicator) never flash white.  The scan page is dark; other pages
+      paint their own #F7F8FA scaffold background on top immediately.
+    */
     html, body {
       margin: 0;
       padding: 0;
-      background-color: #F7F8FA; /* AppColors.background */
-      /* Extend the background colour into safe-area insets */
-      background-attachment: fixed;
+      background-color: #000000;
+      width: 100%;
+      height: 100%;
+      height: -webkit-fill-available; /* iOS Safari real viewport height */
+      overflow: hidden;
+      overscroll-behavior: none;
     }
 
-    /* Prevent any accidental scroll bounce revealing a white underlay. */
-    body {
-      overscroll-behavior: none;
+    /*
+      Force Flutter's view element to cover the full physical screen,
+      including safe-area insets, on iOS Safari with viewport-fit=cover.
+    */
+    flutter-view {
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
     }
   </style>
 </head>

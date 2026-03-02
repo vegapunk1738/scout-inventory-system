@@ -328,11 +328,20 @@ class _ScanPageState extends State<ScanPage>
     final allowBlur = !kIsWeb;
     final showOverlays = _isActive && _uiReady;
 
+    // Full physical screen height — used to extend the camera feed
+    // edge-to-edge behind the notch and home indicator on iOS Safari.
+    final screenH = MediaQuery.sizeOf(context).height;
+
     return Scaffold(
+      backgroundColor: Colors.black,
       body: LayoutBuilder(
         builder: (context, c) {
           final w = c.maxWidth;
           final h = c.maxHeight;
+
+          // If the body doesn't include the top safe area, we need to
+          // extend the camera/overlays upward to cover the full screen.
+          final bodyGap = (screenH - h).clamp(0.0, safe.top);
 
           const sidePad = 16.0;
           const topPad = 10.0;
@@ -379,20 +388,41 @@ class _ScanPageState extends State<ScanPage>
           final titleY = topY + topRowH + gapAfterTopRow;
           final frameY = titleY + titleBlockH + gapTitleToFrame;
 
+          // Full-bleed height: body height + any gap for the safe area.
+          final fullH = h + bodyGap;
+
           return Stack(
             fit: StackFit.expand,
+            clipBehavior: Clip.none,
             children: [
-              RepaintBoundary(
-                child: MobileScanner(
-                  controller: _controller,
-                  fit: BoxFit.cover,
+              // Camera feed — extends into top safe area when needed.
+              Positioned(
+                top: -bodyGap,
+                left: 0,
+                right: 0,
+                height: fullH,
+                child: RepaintBoundary(
+                  child: MobileScanner(
+                    controller: _controller,
+                    fit: BoxFit.cover,
+                  ),
                 ),
               ),
 
               if (!_isActive)
-                const Positioned.fill(child: ColoredBox(color: Colors.black)),
+                Positioned(
+                  top: -bodyGap,
+                  left: 0,
+                  right: 0,
+                  height: fullH,
+                  child: const ColoredBox(color: Colors.black),
+                ),
 
-              Positioned.fill(
+              Positioned(
+                top: -bodyGap,
+                left: 0,
+                right: 0,
+                height: fullH,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -411,7 +441,11 @@ class _ScanPageState extends State<ScanPage>
               ),
 
               if (_isActive)
-                Positioned.fill(
+                Positioned(
+                  top: -bodyGap,
+                  left: 0,
+                  right: 0,
+                  height: fullH,
                   child: IgnorePointer(
                     ignoring: true,
                     child: AnimatedBuilder(
@@ -580,7 +614,11 @@ class _ScanPageState extends State<ScanPage>
               ),
 
               if (_isActive)
-                Positioned.fill(
+                Positioned(
+                  top: -bodyGap,
+                  left: 0,
+                  right: 0,
+                  height: fullH,
                   child: IgnorePointer(
                     ignoring: true,
                     child: ValueListenableBuilder<MobileScannerState>(
