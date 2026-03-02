@@ -324,17 +324,11 @@ class _ScanPageState extends State<ScanPage>
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final safe = MediaQuery.paddingOf(context);
-    // Full physical screen height — used to make the camera feed bleed
-    // edge-to-edge behind the status bar, notch, home indicator, and the
-    // outer shell's navigation bar.
-    final screenH = MediaQuery.sizeOf(context).height;
 
     final allowBlur = !kIsWeb;
     final showOverlays = _isActive && _uiReady;
 
     return Scaffold(
-      // Black avoids any flash of scaffold background during camera init.
-      backgroundColor: Colors.black,
       body: LayoutBuilder(
         builder: (context, c) {
           final w = c.maxWidth;
@@ -357,9 +351,7 @@ class _ScanPageState extends State<ScanPage>
           const shellNavHeight = 78.0;
           const shellNavBottomPad = 12.0;
 
-          // Sits above the shell nav bar + home indicator on every device.
-          final manualBottomInset =
-              shellNavHeight + shellNavBottomPad + safe.bottom + 10.0;
+          const manualBottomInset = 100.0;
 
           final usableH = h - safe.top - safe.bottom;
           final bottomAreaH = manualBtnH + shellNavHeight + shellNavBottomPad;
@@ -390,38 +382,17 @@ class _ScanPageState extends State<ScanPage>
           return Stack(
             fit: StackFit.expand,
             children: [
-              // Camera: bleeds edge-to-edge across the full physical screen.
-              // The body is constrained by the outer shell's nav bar, so we
-              // offset upward by safe.top (status-bar height) and give it the
-              // full screenH so it extends behind the nav bar and home indicator.
-              // Positioned must be a direct child of Stack — RepaintBoundary goes inside.
-              Positioned(
-                top: -safe.top,
-                left: 0,
-                right: 0,
-                height: screenH,
-                child: RepaintBoundary(
-                  child: MobileScanner(
-                    controller: _controller,
-                    fit: BoxFit.cover,
-                  ),
+              RepaintBoundary(
+                child: MobileScanner(
+                  controller: _controller,
+                  fit: BoxFit.cover,
                 ),
               ),
 
               if (!_isActive)
-                Positioned(
-                  top: -safe.top,
-                  left: 0,
-                  right: 0,
-                  height: screenH,
-                  child: const ColoredBox(color: Colors.black),
-                ),
+                const Positioned.fill(child: ColoredBox(color: Colors.black)),
 
-              Positioned(
-                top: -safe.top,
-                left: 0,
-                right: 0,
-                height: screenH,
+              Positioned.fill(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -440,11 +411,7 @@ class _ScanPageState extends State<ScanPage>
               ),
 
               if (_isActive)
-                Positioned(
-                  top: -safe.top,
-                  left: 0,
-                  right: 0,
-                  height: screenH,
+                Positioned.fill(
                   child: IgnorePointer(
                     ignoring: true,
                     child: AnimatedBuilder(
