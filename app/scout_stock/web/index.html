@@ -20,9 +20,22 @@
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Scout Inventory System">
 
+  <!--
+    viewport-fit=cover: lets the Flutter canvas extend to the physical screen
+    edges (behind the notch and home indicator) so no browser background
+    colour bleeds through as white bars.
+
+    apple-mobile-web-app-status-bar-style: black-translucent pairs with
+    viewport-fit=cover so the status bar is transparent over your content.
+
+    Flutter's MediaQuery / SafeArea widgets then keep every interactive
+    UI element (buttons, lists, etc.) inside the safe zone automatically.
+  -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="scout_stock">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
@@ -32,6 +45,24 @@
 
   <title>Scout Stock</title>
   <link rel="manifest" href="manifest.json">
+
+  <style>
+    /* Match Flutter's AppColors.background so the browser chrome areas
+       (status bar, home indicator strip) are never white — they blend
+       seamlessly with the app canvas. */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background-color: #F7F8FA; /* AppColors.background */
+      /* Extend the background colour into safe-area insets */
+      background-attachment: fixed;
+    }
+
+    /* Prevent any accidental scroll bounce revealing a white underlay. */
+    body {
+      overscroll-behavior: none;
+    }
+  </style>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>

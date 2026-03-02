@@ -389,7 +389,7 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
                     physics: const NeverScrollableScrollPhysics(),
                     shrinkWrap: true,
                     itemCount: _items.length,
-                    separatorBuilder: (_, __) =>
+                    separatorBuilder: (_, _) =>
                         SizedBox(height: compact ? 10 : 12),
                     itemBuilder: (context, i) {
                       final it = _items[i];
