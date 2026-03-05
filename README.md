@@ -4,15 +4,13 @@
 
 This project is licensed under the PolyForm Noncommercial License.
 Commercial use is **not permitted**.
-
 See the LICENSE file for details.
-
 
 ## Getting Started
 
 ### 1. Flutter Web
 
-Make sure Flutter is installed
+Make sure Flutter is installed:
 
 ```bash
 flutter doctor
@@ -24,121 +22,150 @@ You should see:
 [✓] Chrome - develop for the web
 ```
 
-Inside ```scout_stock``` folder, run the app normally:
+Inside the `scout_stock` folder, run the app:
 
 ```bash
 flutter run -d chrome
 ```
 
-### 2. Backend (API) Setup — Cloudflare Workers + D1 + Hono + Bun
+### 2. Backend (API) — Cloudflare Workers + D1 + Hono + Bun
 
 The API runs on **Cloudflare Workers** using **Hono**.
 Data is stored in **Cloudflare D1 (SQLite)**.
 Schema changes are managed with **Drizzle** (generate SQL migrations) + **Wrangler** (apply migrations).
 
-### Dev vs Prod databases
+---
+
+## Dev vs Prod Databases
 
 We use **two D1 databases**:
 
-- **DEV:** `scout-stock-db-dev`
-  - configured in `api/wrangler.json` (includes the dev `database_id`)
-  - safe for testing
+| Environment | Database Name | Usage |
+|---|---|---|
+| **Dev** | `scout-stock-db-dev` | Local development via `bun dev` (connects remotely) |
+| **Prod** | `scout-stock-db` | Production, deployed via Cloudflare Git integration |
 
-- **PROD:** `scout-stock-db`
-  - configured as the `prod` environment in `api/wrangler.json`
-  - **does NOT include the prod database_id** in git
-  - **requires manual binding in the Cloudflare Dashboard** (see below)
-
-In the Worker code, we always reference the same binding name: `DB`.
+Both are configured in `api/wrangler.jsonc`. The prod DB lives under `[env.prod]`.
+In code, both use the same binding name: `DB`.
 
 ---
 
 ## Prerequisites
 
+Install [Bun](https://bun.sh), then:
 
-
-Install Bun (if you don’t already have it), then install API 
-```
+```bash
 cd api
 bun install
-bun wrangler login
-```
-1) Create the D1 databases (one-time).
-```
-wrangler d1 create scout-stock-db-dev
-wrangler d1 create scout-stock-db
-✅ The dev DB ID is already stored in wrangler.json.
-❌ Do not commit the prod DB ID.
+bunx wrangler login
 ```
 
-2) IMPORTANT: Manual PROD binding in Cloudflare Dashboard (required)
-```
-Production deployments use the prod environment (--env prod), and the database name is scout-stock-db.
-Because the prod DB ID is not stored in git, you must bind it manually in the Cloudflare Dashboard:
+### Create D1 databases (one-time)
 
-Cloudflare Dashboard → Workers & Pages
-
-Open the Worker: scout-stock-api
-
-Go to Settings → Bindings
-
-Add a D1 Database binding:
-
-Variable name: DB
-
-Database: scout-stock-db
-
-Save
-
-⚠️ If this manual binding is missing, prod will not have a DB binding at runtime.
+```bash
+bunx wrangler d1 create scout-stock-db-dev
+bunx wrangler d1 create scout-stock-db
 ```
 
-3) Local dev (uses DEV DB)
-```
-bun run dev
-This runs wrangler dev and connects to the remote DEV database (scout-stock-db-dev) because remote: true is set in wrangler.json.
+Paste the returned `database_id` values into `api/wrangler.jsonc`:
+
+- Dev ID → top-level `d1_databases` array
+- Prod ID → `env.prod.d1_databases` array
+
+---
+
+## Local Development
+
+```bash
+bun dev
 ```
 
-4) Database migrations (Drizzle + Wrangler)
-```
-cd api/src/db/schema.ts
-Generate migration SQL (Drizzle)
+This runs `wrangler dev --remote`, which starts a local server connected to the **remote dev database** (`scout-stock-db-dev`).
+
+---
+
+## Database Migrations (Drizzle + Wrangler)
+
+1. Edit your schema in `api/src/db/schema.ts`
+
+2. Generate migration SQL:
+
+```bash
 bun run db:generate
-This creates SQL files in:
+```
 
-cd api/drizzle/
-Commit the migration files.
+This creates SQL files in `api/drizzle/`. Commit these files.
 
-Apply migrations
+3. Apply migrations:
 
-DEV:
+```bash
+# Dev
 bun run migrate:dev
 
-PROD:
+# Prod
 bun run migrate:prod
-✅ Always run migrations before deploying code that depends on them.
 ```
 
-5) Deploy
-```
-DEV deploy:
-bun run deploy:dev
+Always run migrations before deploying code that depends on them.
 
-PROD deploy:
-bun run deploy:prod
-⚠️ Never deploy prod without --env prod (the script already includes it).
-```
+---
 
-6) One-command release (recommended)
-```
-These commands do:
-generate migrations
-apply migrations
-deploy
+## Deployment
 
-DEV:
-bun run release:dev
+### CI/CD (automatic)
 
-PROD:
+Production deploys are handled by **Cloudflare Git integration**:
+
+- Push to `main` → auto builds and deploys to prod
+- Build command: installs deps, generates migrations, applies prod migrations
+- Deploy command: `npx wrangler deploy --env prod`
+- Root directory: `/api`
+
+Non-production branch builds are disabled.
+
+### Manual deploy (if needed)
+
+```bash
+# Prod
 bun run release:prod
 ```
+
+This runs: generate migrations → apply prod migrations → deploy with `--env prod`.
+
+---
+
+## Scripts Reference
+
+| Script | Command | Purpose |
+|---|---|---|
+| `bun dev` | `wrangler dev --remote` | Local dev server using remote dev DB |
+| `bun run db:generate` | `bunx drizzle-kit generate` | Generate migration SQL from schema |
+| `bun run migrate:dev` | `wrangler d1 migrations apply scout-stock-db-dev --remote` | Apply migrations to dev DB |
+| `bun run migrate:prod` | `wrangler d1 migrations apply scout-stock-db --remote --env prod` | Apply migrations to prod DB |
+| `bun run deploy:prod` | `wrangler deploy --env prod` | Deploy worker to prod |
+| `bun run release:prod` | generate + migrate + deploy prod | Full prod release |
+
+---
+
+## wrangler.jsonc Structure
+
+```jsonc
+{
+  // Default (dev)
+  "d1_databases": [
+    { "binding": "DB", "database_name": "scout-stock-db-dev", "database_id": "..." }
+  ],
+
+  // Production
+  "env": {
+    "prod": {
+      "name": "scout-stock-api-prod",
+      "d1_databases": [
+        { "binding": "DB", "database_name": "scout-stock-db", "database_id": "..." }
+      ]
+    }
+  }
+}
+```
+
+Same `DB` binding in code — the environment flag determines which database is used.

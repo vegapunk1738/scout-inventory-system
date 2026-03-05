@@ -13,16 +13,17 @@
 		{
 			"binding": "DB",
 			"database_name": "scout-stock-db-dev",
-			"database_id": "9749dc25-33aa-4cb8-bce3-c4d3a6edfa72",
-			"remote": true
+			"database_id": "3f37ed43-95da-4f68-a112-5cd52c46f778"
 		}
 	],
 	"env": {
 		"prod": {
+			"name": "scout-stock-api-prod",
 			"d1_databases": [
 				{
 					"binding": "DB",
-					"database_name": "scout-stock-db"
+					"database_name": "scout-stock-db",
+					"database_id": "21e7a83e-17c8-4a3b-ad8b-123d2df3fa13"
 				}
 			]
 		}
