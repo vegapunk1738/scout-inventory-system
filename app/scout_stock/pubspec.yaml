@@ -40,6 +40,7 @@ dependencies:
   go_router: ^17.1.0
   pdf: any
   printing: any
+  shared_preferences: ^2.5.4
 
 dev_dependencies:
   flutter_test:
@@ -66,6 +67,7 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - assets/
+    - assets/images/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -39,5 +39,5 @@ export const transaction_items = sqliteTable("transaction_items", {
   bucket_id: text("bucket_id").notNull(),
   item_type_id: text("item_type_id").notNull(),
   quantity: integer("quantity").notNull(),
-  direction: integer("direction").notNull(), // -1 checkout, +1 return
+  direction: integer("direction").notNull(),
 });

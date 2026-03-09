@@ -3,6 +3,7 @@ class AppRoutes {
 
   // System
   static const String root = '/';
+  static const String login = '/login';
   static const String loading = '/loading';
   static const String error = '/error';
 

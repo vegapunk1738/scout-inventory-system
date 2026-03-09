@@ -2,15 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/presentation/widgets/checkout_result_dialog.dart';
+import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
 import 'package:scout_stock/presentation/widgets/hold_icon_button.dart';
 import 'package:scout_stock/state/notifiers/me_notifier.dart';
-
+import 'package:scout_stock/state/providers/auth_providers.dart';
 import 'package:scout_stock/state/providers/me_provider.dart';
-import 'package:scout_stock/state/providers/current_user_provider.dart';
-
 import 'package:scout_stock/theme/app_theme.dart';
 
 class MePage extends ConsumerWidget {
@@ -20,7 +18,7 @@ class MePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final me = ref.watch(meProvider);
     final notifier = ref.read(meProvider.notifier);
-    final userAsync = ref.watch(currentUserProvider);
+    final user = ref.watch(currentUserProvider);
 
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
@@ -38,16 +36,8 @@ class MePage extends ConsumerWidget {
           ]
         : const <BoxShadow>[];
 
-    final displayName = userAsync.maybeWhen(
-      data: (u) => u.name,
-      orElse: () => 'Loading…',
-    );
-
-    final role = userAsync.maybeWhen(
-      data: (u) => u.role.isAdmin ? 'Admin' : 'Scout',
-      orElse: () => '',
-    );
-
+    final displayName = user?.name ?? 'Loading…';
+    final role = user == null ? '' : (user.role.isAdmin ? 'Admin' : 'Scout');
     final initials = _initials(displayName);
 
     final rows = _buildRows(
@@ -58,25 +48,25 @@ class MePage extends ConsumerWidget {
 
     final rowsEmptyForMode = rows.isEmpty;
 
-    String emptyTitle = "Nothing here yet";
+    String emptyTitle = 'Nothing here yet';
     String emptySubtitle =
-        "Checked out and returned items will show up on this page";
-    String emptyEmoji = "📦";
+        'Checked out and returned items will show up on this page';
+    String emptyEmoji = '📦';
 
     if (!me.hasAny) {
-      emptyTitle = "Nothing here yet";
+      emptyTitle = 'Nothing here yet';
       emptySubtitle =
-          "Checked out and returned items will show up on this page";
-      emptyEmoji = "📦";
+          'Checked out and returned items will show up on this page';
+      emptyEmoji = '📦';
     } else if (me.mode == MeFilterMode.borrowedOnly && me.borrowed.isEmpty) {
-      emptyTitle = "No borrowed items";
-      emptySubtitle = "When you check out gear, it will appear here";
-      emptyEmoji = "📤";
+      emptyTitle = 'No borrowed items';
+      emptySubtitle = 'When you check out gear, it will appear here';
+      emptyEmoji = '📤';
     } else if (me.mode == MeFilterMode.returnedOnly && me.returned.isEmpty) {
-      emptyTitle = "No returns yet";
+      emptyTitle = 'No returns yet';
       emptySubtitle =
-          "Returned items will show up here once you bring them back";
-      emptyEmoji = "📥";
+          'Returned items will show up here once you bring them back';
+      emptyEmoji = '📥';
     }
 
     Future<void> onReturn() async {
@@ -90,8 +80,8 @@ class MePage extends ConsumerWidget {
           context,
           child: CheckoutResultDialog.success(
             transactionId: res.txnId!,
-            title: "Return Complete",
-            message: "Items successfully returned.",
+            title: 'Return Complete',
+            message: 'Items successfully returned.',
             onFinish: () {},
           ),
         );
@@ -108,19 +98,45 @@ class MePage extends ConsumerWidget {
       }
     }
 
+    Future<void> onLogout() async {
+      final shouldLogout = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Log out?'),
+            content: const Text(
+              'You will need to sign in again to access Scout Stock.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Log out'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (shouldLogout != true) return;
+      await ref.read(authControllerProvider.notifier).logout();
+    }
+
     final showBottomReturn =
         (me.mode != MeFilterMode.returnedOnly) &&
         me.totalToReturn > 0 &&
         me.borrowed.isNotEmpty;
 
-    // ✅ Match CartPage bottom button behavior (no manual navBarHeight offset).
     final btnHeight = compact ? 62.0 : 66.0;
     final btnPadTop = compact ? 8.0 : 10.0;
     final btnPadBottom = compact ? 10.0 : 12.0;
 
     final bottomBarFootprint = showBottomReturn
         ? (btnHeight + btnPadTop + btnPadBottom + safeBottom)
-        : 0;
+        : 0.0;
 
     final double listBottomPadding = showBottomReturn
         ? (bottomBarFootprint + 12.0)
@@ -128,9 +144,6 @@ class MePage extends ConsumerWidget {
 
     final emojiBase = GoogleFonts.notoColorEmoji(height: 1);
     final listSide = compact ? 12.0 : 14.0;
-
-    // ✅ Sticky header (profile + pills), pinned like Review Cart AppBar.
-    // Height is deterministic (single-line name), so we can use fixed extents.
     final stickyExtent = (top + 12) + 44 + 14 + 56 + 12;
 
     return Scaffold(
@@ -138,7 +151,6 @@ class MePage extends ConsumerWidget {
       body: Stack(
         children: [
           const Positioned.fill(child: DottedBackground()),
-
           Positioned.fill(
             child: CustomScrollView(
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -152,13 +164,15 @@ class MePage extends ConsumerWidget {
                     role: role,
                     initials: initials,
                     mode: me.mode,
-                    onTapBorrowed: () =>
-                        notifier.toggleMode(MeFilterMode.borrowedOnly),
-                    onTapReturned: () =>
-                        notifier.toggleMode(MeFilterMode.returnedOnly),
+                    onTapBorrowed: () {
+                      notifier.toggleMode(MeFilterMode.borrowedOnly);
+                    },
+                    onTapReturned: () {
+                      notifier.toggleMode(MeFilterMode.returnedOnly);
+                    },
+                    onLogout: onLogout,
                   ),
                 ),
-
                 if (rowsEmptyForMode)
                   SliverFillRemaining(
                     hasScrollBody: false,
@@ -185,7 +199,7 @@ class MePage extends ConsumerWidget {
 
                         if (r.kind == _MeRowKind.header) {
                           return KeyedSubtree(
-                            key: ValueKey("h_${r.header}"),
+                            key: ValueKey('h_${r.header}'),
                             child: _DateHeader(
                               title: r.header!,
                               topGap: r.topGap,
@@ -196,7 +210,7 @@ class MePage extends ConsumerWidget {
                         if (r.kind == _MeRowKind.borrowed) {
                           final line = r.borrowed!;
                           return Padding(
-                            key: ValueKey("b_${line.id}"),
+                            key: ValueKey('b_${line.id}'),
                             padding: EdgeInsets.only(bottom: compact ? 10 : 12),
                             child: RepaintBoundary(
                               child: _BorrowedCard(
@@ -206,8 +220,9 @@ class MePage extends ConsumerWidget {
                                 shadow: shadow,
                                 textTheme: t,
                                 emojiBase: emojiBase,
-                                onChanged: (next) =>
-                                    notifier.setToReturn(line.id, next),
+                                onChanged: (next) {
+                                  notifier.setToReturn(line.id, next);
+                                },
                               ),
                             ),
                           );
@@ -220,7 +235,7 @@ class MePage extends ConsumerWidget {
 
                         final line = r.returned!;
                         return Padding(
-                          key: ValueKey("r_${line.id}"),
+                          key: ValueKey('r_${line.id}'),
                           padding: EdgeInsets.only(bottom: compact ? 10 : 12),
                           child: RepaintBoundary(
                             child: _ReturnedCard(
@@ -238,14 +253,10 @@ class MePage extends ConsumerWidget {
                       }, childCount: rows.length),
                     ),
                   ),
-
-                // ✅ Bottom spacer so the last card is never hidden behind the Return button.
                 SliverToBoxAdapter(child: SizedBox(height: listBottomPadding)),
               ],
             ),
           ),
-
-          // ✅ Fade + bottom button (same pattern as CartPage)
           if (showBottomReturn) ...[
             Positioned(
               left: 0,
@@ -271,8 +282,8 @@ class MePage extends ConsumerWidget {
               alignment: Alignment.bottomCenter,
               child: GlowingActionButton(
                 label: me.totalToReturn == 1
-                    ? "Return Items (1)"
-                    : "Return Items (${me.totalToReturn})",
+                    ? 'Return Items (1)'
+                    : 'Return Items (${me.totalToReturn})',
                 icon: const Icon(Icons.keyboard_return_rounded),
                 loading: me.submitting,
                 onPressed: me.submitting ? null : onReturn,
@@ -302,18 +313,18 @@ class _MeStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
     required this.mode,
     required this.onTapBorrowed,
     required this.onTapReturned,
+    required this.onLogout,
   });
 
   final double extent;
   final double top;
-
   final String name;
   final String role;
   final String initials;
-
   final MeFilterMode mode;
   final VoidCallback onTapBorrowed;
   final VoidCallback onTapReturned;
+  final VoidCallback onLogout;
 
   @override
   double get minExtent => extent;
@@ -352,7 +363,7 @@ class _MeStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
               name: name,
               role: role,
               initials: initials,
-              onSettings: () {},
+              onLogout: onLogout,
             ),
             const SizedBox(height: 14),
             _BorrowReturnPills(
@@ -373,7 +384,8 @@ class _MeStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
         name != oldDelegate.name ||
         role != oldDelegate.role ||
         initials != oldDelegate.initials ||
-        mode != oldDelegate.mode;
+        mode != oldDelegate.mode ||
+        onLogout != oldDelegate.onLogout;
   }
 }
 
@@ -382,13 +394,13 @@ class _MeHeader extends StatelessWidget {
     required this.name,
     required this.role,
     required this.initials,
-    required this.onSettings,
+    required this.onLogout,
   });
 
   final String name;
   final String role;
   final String initials;
-  final VoidCallback onSettings;
+  final VoidCallback onLogout;
 
   @override
   Widget build(BuildContext context) {
@@ -428,21 +440,14 @@ class _MeHeader extends StatelessWidget {
             ],
           ),
         ),
-        Visibility(
-          visible: false,
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(tokens.radiusLg),
-              border: Border.all(color: AppColors.outline),
-            ),
-            child: IconButton(
-              onPressed: onSettings,
-              icon: const Icon(Icons.settings_rounded),
-              splashRadius: 22,
-            ),
+        SizedBox(
+          width: 44,
+          height: 44,
+          child: IconButton(
+            onPressed: onLogout,
+            icon: const Icon(Icons.logout_rounded),
+            splashRadius: 22,
+            tooltip: 'Logout',
           ),
         ),
       ],
@@ -482,7 +487,7 @@ class _BorrowReturnPills extends StatelessWidget {
         children: [
           Expanded(
             child: _Pill(
-              label: "Borrowed",
+              label: 'Borrowed',
               selected: borrowedSelected,
               selectedBg: AppColors.primary,
               selectedFg: Colors.white,
@@ -494,7 +499,7 @@ class _BorrowReturnPills extends StatelessWidget {
           const SizedBox(width: 6),
           Expanded(
             child: _Pill(
-              label: "Returned",
+              label: 'Returned',
               selected: returnedSelected,
               selectedBg: AppColors.ink.withValues(alpha: 0.72),
               selectedFg: Colors.white,
@@ -646,7 +651,7 @@ class _DateHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final isToday = title.contains("(TODAY)");
+    final isToday = title.contains('(TODAY)');
 
     return Padding(
       padding: EdgeInsets.only(top: topGap, bottom: 12),
@@ -695,7 +700,6 @@ class _BorrowedCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final tile = compact ? 42.0 : 48.0;
     final emojiSize = compact ? 22.0 : 26.0;
-
     final item = record.item;
 
     return Container(
@@ -796,7 +800,6 @@ class _ReturnedCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final tile = compact ? 42.0 : 48.0;
     final emojiSize = compact ? 22.0 : 26.0;
-
     final item = record.item;
 
     final base = Container(
@@ -1087,17 +1090,9 @@ class _EmptyMeState extends StatelessWidget {
           children: [
             Text(emptyEmoji, style: emojiBase.copyWith(fontSize: 54)),
             const SizedBox(height: 10),
-            Text(
-              emptyTitle,
-              style: titleStyle,
-              textAlign: TextAlign.center,
-            ),
+            Text(emptyTitle, style: titleStyle, textAlign: TextAlign.center),
             const SizedBox(height: 8),
-            Text(
-              emptySubtitle,
-              style: bodyStyle,
-              textAlign: TextAlign.center,
-            ),
+            Text(emptySubtitle, style: bodyStyle, textAlign: TextAlign.center),
           ],
         ),
       ),
@@ -1108,16 +1103,19 @@ class _EmptyMeState extends StatelessWidget {
 String _initials(String name) {
   final parts = name
       .trim()
-      .split(RegExp(r"\s+"))
+      .split(RegExp(r'\s+'))
       .where((p) => p.isNotEmpty)
       .toList();
-  if (parts.isEmpty) return "?";
+
+  if (parts.isEmpty) return '?';
+
   if (parts.length == 1) {
     final s = parts.first;
     return (s.length >= 2 ? s.substring(0, 2) : s.substring(0, 1))
         .toUpperCase();
   }
-  return "${parts.first[0]}${parts.last[0]}".toUpperCase();
+
+  return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
 }
 
 DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
@@ -1127,20 +1125,20 @@ String _sectionTitle(DateTime d) {
   final isToday = _dateOnly(d) == today;
 
   const months = [
-    "JANUARY",
-    "FEBRUARY",
-    "MARCH",
-    "APRIL",
-    "MAY",
-    "JUNE",
-    "JULY",
-    "AUGUST",
-    "SEPTEMBER",
-    "OCTOBER",
-    "NOVEMBER",
-    "DECEMBER",
+    'JANUARY',
+    'FEBRUARY',
+    'MARCH',
+    'APRIL',
+    'MAY',
+    'JUNE',
+    'JULY',
+    'AUGUST',
+    'SEPTEMBER',
+    'OCTOBER',
+    'NOVEMBER',
+    'DECEMBER',
   ];
 
-  final base = "${months[d.month - 1]} ${d.day}";
-  return isToday ? "$base (TODAY)" : base;
+  final base = '${months[d.month - 1]} ${d.day}';
+  return isToday ? '$base (TODAY)' : base;
 }

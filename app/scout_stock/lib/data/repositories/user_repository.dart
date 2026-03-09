@@ -17,7 +17,7 @@ class MockUserRepository implements UserRepository {
     return AppUser(
       id: 'u_001',
       name: pretendAdmin ? 'Admin User' : 'Scout User',
-      identifier: pretendAdmin ? 'admin@scouts-nde' : 'scout@scouts-nde',
+      scoutId: '0001',
       role: pretendAdmin ? UserRole.admin : UserRole.scout,
     );
   }

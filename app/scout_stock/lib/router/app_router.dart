@@ -2,92 +2,96 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:scout_stock/domain/models/app_user.dart';
+import 'package:scout_stock/domain/models/auth_session.dart';
 
 import 'package:scout_stock/presentation/pages/admin/activity_log_admin_page.dart';
 import 'package:scout_stock/presentation/pages/admin/bucket_management_admin_page.dart';
-import 'package:scout_stock/presentation/pages/admin/users_page.dart';
-import 'package:scout_stock/presentation/pages/admin/user_upsert_page.dart';
 import 'package:scout_stock/presentation/pages/admin/bucket_upsert_page.dart';
+import 'package:scout_stock/presentation/pages/admin/user_upsert_page.dart';
+import 'package:scout_stock/presentation/pages/admin/users_page.dart';
 import 'package:scout_stock/presentation/pages/bucket_mixed_items_page.dart';
 import 'package:scout_stock/presentation/pages/bucket_single_item_page.dart';
 import 'package:scout_stock/presentation/pages/cart_page.dart';
+import 'package:scout_stock/presentation/pages/login_page.dart';
 import 'package:scout_stock/presentation/pages/manual_entry_page.dart';
 import 'package:scout_stock/presentation/pages/me_page.dart';
 import 'package:scout_stock/presentation/pages/scan_page.dart';
 import 'package:scout_stock/presentation/widgets/admin_shell.dart';
+import 'package:scout_stock/state/providers/auth_providers.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
-import 'package:scout_stock/state/providers/current_user_provider.dart';
 import 'app_routes.dart';
 
 final _rootNavKey = GlobalKey<NavigatorState>(debugLabel: 'rootNav');
 
-/// Keeps GoRouter in sync with Riverpod auth/user state without rebuilding the
-/// router instance (important for performance and to preserve navigation stacks).
 class _RouterAuthNotifier extends ChangeNotifier {
   _RouterAuthNotifier(this._ref) {
-    _ref.listen(currentUserProvider, (prev, next) {
-      _userAsync = next;
+    _ref.listen<AsyncValue<AuthSession?>>(authControllerProvider, (
+      previous,
+      next,
+    ) {
+      _authAsync = next;
       notifyListeners();
     }, fireImmediately: true);
   }
 
   final Ref _ref;
 
-  AsyncValue<dynamic> _userAsync = const AsyncLoading<dynamic>();
-  AsyncValue<dynamic> get userAsync => _userAsync;
+  AsyncValue<AuthSession?> _authAsync = const AsyncLoading<AuthSession?>();
+  AsyncValue<AuthSession?> get authAsync => _authAsync;
 }
 
 final _routerAuthNotifierProvider = Provider<_RouterAuthNotifier>((ref) {
-  final n = _RouterAuthNotifier(ref);
-  ref.onDispose(n.dispose);
-  return n;
+  final notifier = _RouterAuthNotifier(ref);
+  ref.onDispose(notifier.dispose);
+  return notifier;
 });
 
 final goRouterProvider = Provider<GoRouter>((ref) {
-  final auth = ref.watch(_routerAuthNotifierProvider);
+  final authNotifier = ref.watch(_routerAuthNotifierProvider);
 
   return GoRouter(
     navigatorKey: _rootNavKey,
     initialLocation: AppRoutes.root,
     debugLogDiagnostics: false,
-    refreshListenable: auth,
+    refreshListenable: authNotifier,
     redirect: (context, state) {
-      final userAsync = auth.userAsync;
-      final loc = state.matchedLocation;
+      final authAsync = authNotifier.authAsync;
+      final location = state.matchedLocation;
 
-      // 1) User bootstrap
-      if (userAsync.isLoading) {
-        return (loc == AppRoutes.loading) ? null : AppRoutes.loading;
+      final isAtLogin = location == AppRoutes.login;
+      final isAtLoading = location == AppRoutes.loading;
+
+      if (authAsync.isLoading) {
+        return isAtLoading ? null : AppRoutes.loading;
       }
-      if (userAsync.hasError) {
-        return (loc == AppRoutes.error) ? null : AppRoutes.error;
+
+      if (authAsync.hasError) {
+        return isAtLogin ? null : AppRoutes.login;
       }
 
-      // 2) Role gates + canonical admin tab URLs
-      final user = userAsync.value;
-      final AppUser u = user;
-      final bool isAdmin = u.role.isAdmin == true;
+      final session = authAsync.asData?.value;
+      final signedIn = session != null;
 
-      if (loc == AppRoutes.loading) {
+      if (!signedIn) {
+        return isAtLogin ? null : AppRoutes.login;
+      }
+
+      final AppUser user = session.user;
+      final bool isAdmin = user.role.isAdmin;
+
+      if (isAtLogin || location == AppRoutes.root || isAtLoading) {
         return isAdmin ? AppRoutes.adminScan : AppRoutes.scan;
       }
 
-      // Root always redirects to a stable entry point.
-      if (loc == AppRoutes.root) {
-        return isAdmin ? AppRoutes.adminScan : AppRoutes.scan;
-      }
-
-      // Non-admins never see admin shell routes.
-      if (!isAdmin && loc.startsWith(AppRoutes.adminBase)) {
+      if (!isAdmin && location.startsWith(AppRoutes.adminBase)) {
         return AppRoutes.scan;
       }
 
-      // Admins: keep legacy/scout URLs canonical by mapping to admin tabs.
       if (isAdmin) {
-        if (loc == AppRoutes.scan) return AppRoutes.adminScan;
-        if (loc == AppRoutes.cart) return AppRoutes.adminCart;
-        if (loc == AppRoutes.me) return AppRoutes.adminMe;
+        if (location == AppRoutes.scan) return AppRoutes.adminScan;
+        if (location == AppRoutes.cart) return AppRoutes.adminCart;
+        if (location == AppRoutes.me) return AppRoutes.adminMe;
       }
 
       return null;
@@ -102,11 +106,14 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const _AppLoadingScreen(),
       ),
       GoRoute(
+        path: AppRoutes.login,
+        builder: (context, state) => const LoginPage(),
+      ),
+      GoRoute(
         path: AppRoutes.error,
         builder: (context, state) => const _AppErrorScreen(),
       ),
 
-      // Scout/common top-level routes (admins are redirected to /a/*).
       GoRoute(
         path: AppRoutes.scan,
         name: 'scan',
@@ -123,7 +130,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => MePage(),
       ),
 
-      // Routes that must always sit above the admin shell (no bottom nav).
       GoRoute(
         parentNavigatorKey: _rootNavKey,
         path: AppRoutes.manualEntry,
@@ -141,7 +147,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
 
-      // Admin: user create/edit pages (above the shell, no bottom nav).
       GoRoute(
         parentNavigatorKey: _rootNavKey,
         path: AppRoutes.adminUserCreate,
@@ -155,14 +160,15 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           final id = state.pathParameters['id'] ?? '';
           final extra = state.extra;
+
           final args = extra is UserUpsertArgs
               ? extra
               : UserUpsertArgs(scoutId: id, displayName: '', role: 'scout');
+
           return UserUpsertPage(editArgs: args);
         },
       ),
 
-      // Admin: bucket create/edit pages (above the shell, no bottom nav).
       GoRoute(
         parentNavigatorKey: _rootNavKey,
         path: AppRoutes.adminBucketCreate,
@@ -176,6 +182,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           final id = state.pathParameters['id'] ?? '';
           final extra = state.extra;
+
           final args = extra is BucketUpsertArgs
               ? extra
               : BucketUpsertArgs(
@@ -184,17 +191,16 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                   emoji: '🪣',
                   contents: const [],
                 );
+
           return BucketUpsertPage(editArgs: args);
         },
       ),
 
-      // Make /a resolve cleanly.
       GoRoute(
         path: AppRoutes.adminBase,
         redirect: (context, state) => AppRoutes.adminScan,
       ),
 
-      // Admin shell (tabs) with preserved per-tab navigation stacks.
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
           return AdminRouterShell(navigationShell: navigationShell);
@@ -278,7 +284,6 @@ class _BucketRouteDecider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Demo routing behavior (mirrors ScanPage demo barcodes).
     if (barcode == 'ABC-ABC-123') {
       return BucketItemPage(barcode: barcode);
     }
@@ -322,7 +327,6 @@ class _BucketRouteDecider extends StatelessWidget {
       );
     }
 
-    // Unknown buckets shouldn't happen in demo flows, but handle deep links.
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -353,26 +357,13 @@ class _AppErrorScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final userAsync = ref.watch(currentUserProvider);
-    final msg = userAsync.hasError
-        ? userAsync.error.toString()
+    final authAsync = ref.watch(authControllerProvider);
+    final message = authAsync.hasError
+        ? authAsync.error.toString()
         : 'Unknown error';
 
-    return Scaffold(body: Center(child: Text('Failed to load user:\n$msg')));
-  }
-}
-
-class _PlaceholderPage extends StatelessWidget {
-  const _PlaceholderPage({required this.title});
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
-      body: Center(
-        child: Text(title, style: Theme.of(context).textTheme.titleLarge),
-      ),
+      body: Center(child: Text('Failed to load user:\n$message')),
     );
   }
 }
