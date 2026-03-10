@@ -5,6 +5,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:scout_stock/router/app_router.dart';
+import 'package:scout_stock/presentation/widgets/app_toast.dart';
+import 'package:scout_stock/presentation/widgets/session_guard.dart';
 import 'package:scout_stock/state/providers/auth_providers.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
@@ -41,12 +43,18 @@ class MyApp extends ConsumerWidget {
       // Constrain to mobile width only on wide screens (desktop / web browser).
       // On iPhone / iPad the child renders full-width with zero overhead.
       builder: (context, child) {
+        // Session heartbeat — refreshes JWT on app resume + every 5 min.
+        // Toast overlay — stacking notifications, non-blocking.
+        final guarded = AppToastOverlay(
+          child: SessionGuard(child: child!),
+        );
+
         final screenWidth = MediaQuery.sizeOf(context).width;
         const tabletMax = 1024.0;
         const mobileMax = 430.0;
 
         // Phone or tablet — no wrapper, no extra layers.
-        if (screenWidth <= tabletMax) return child!;
+        if (screenWidth <= tabletMax) return guarded;
 
         // Desktop / wide web — centered column with blurry edge shadow.
         return ColoredBox(
@@ -64,7 +72,7 @@ class MyApp extends ConsumerWidget {
                 ],
               ),
               clipBehavior: Clip.none,
-              child: child,
+              child: guarded,
             ),
           ),
         );

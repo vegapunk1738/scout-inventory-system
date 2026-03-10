@@ -1,34 +1,33 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+import 'package:scout_stock/data/api/api_client.dart';
+import 'package:scout_stock/domain/enums/user_role.dart';
+import 'package:scout_stock/domain/models/managed_user.dart';
+import 'package:scout_stock/presentation/pages/admin/user_upsert_page.dart';
+import 'package:scout_stock/presentation/widgets/app_toast.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/router/app_routes.dart';
-import 'package:scout_stock/presentation/pages/admin/user_upsert_page.dart';
+import 'package:scout_stock/state/providers/auth_providers.dart';
+import 'package:scout_stock/state/providers/users_provider.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
-enum MemberRole { scout, admin }
+// ═══════════════════════════════════════════════════════════════════════════
+// Users Admin Page — connected to backend via usersProvider
+// ═══════════════════════════════════════════════════════════════════════════
 
-class TeamMember {
-  const TeamMember({required this.id, required this.name, required this.role});
-
-  final String id; // digits only, display as #id
-  final String name;
-  final MemberRole role;
-}
-
-class UsersAdminPage extends StatefulWidget {
+class UsersAdminPage extends ConsumerStatefulWidget {
   const UsersAdminPage({super.key});
 
   @override
-  State<UsersAdminPage> createState() => _UsersAdminPageState();
+  ConsumerState<UsersAdminPage> createState() => _UsersAdminPageState();
 }
 
-class _UsersAdminPageState extends State<UsersAdminPage> {
+class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
   final _searchCtrl = TextEditingController();
-  String _query = "";
-
-  late final List<TeamMember> _seed = (List<TeamMember>.of(_mockMembers())
-    ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())));
+  String _query = '';
 
   final Map<String, ValueNotifier<bool>> _expanded = {};
 
@@ -45,6 +44,198 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
     super.dispose();
   }
 
+  // ── Helpers ────────────────────────────────────────────────────────────
+
+  List<ManagedUser> _filterAndSort(List<ManagedUser> all) {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return all;
+    return all
+        .where(
+          (u) =>
+              u.fullName.toLowerCase().contains(q) ||
+              u.scoutId.toLowerCase().contains(q),
+        )
+        .toList(growable: false);
+  }
+
+  String _apiErrorMessage(Object e) {
+    if (e is ApiException) return e.message;
+    return 'Something went wrong. Please try again.';
+  }
+
+  // ── Actions ────────────────────────────────────────────────────────────
+
+  Future<void> _onAdd() async {
+    final res = await context.push<Map<String, dynamic>>(
+      AppRoutes.adminUserCreate,
+    );
+    if (!mounted || res == null) return;
+
+    final scoutId = (res['scoutId'] ?? '').toString();
+    final fullName = (res['displayName'] ?? '').toString();
+    final role = (res['role'] ?? 'scout').toString();
+    final password = (res['password'] ?? '').toString();
+
+    try {
+      await ref
+          .read(usersProvider.notifier)
+          .createUser(
+            scoutId: scoutId,
+            fullName: fullName,
+            password: password,
+            role: role,
+          );
+      if (!mounted) return;
+      AppToast.of(context).show(
+        AppToastData.success(
+          title: 'User Created',
+          subtitle: '$fullName  ·  ID #$scoutId',
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.of(context).show(
+        AppToastData.error(
+          title: 'Creation Failed',
+          subtitle: _apiErrorMessage(e),
+        ),
+      );
+    }
+  }
+
+  Future<void> _onEdit(ManagedUser user) async {
+    if (user.isSuperAdmin) return;
+
+    final res = await context.push<Map<String, dynamic>>(
+      AppRoutes.adminUserEdit(user.scoutId),
+      extra: UserUpsertArgs(
+        scoutId: user.scoutId,
+        displayName: user.fullName,
+        role: user.role.toJson(),
+      ),
+    );
+    if (!mounted || res == null) return;
+
+    final newName = res['displayName'] as String?;
+    final newRole = res['role'] as String?;
+    final newPassword = res['newPassword'] as String?;
+
+    final nameChanged = newName != null && newName != user.fullName;
+    final roleChanged = newRole != null && newRole != user.role.toJson();
+    final pwChanged = newPassword != null && newPassword.trim().isNotEmpty;
+
+    if (!nameChanged && !roleChanged && !pwChanged) return;
+
+    try {
+      await ref
+          .read(usersProvider.notifier)
+          .updateUser(
+            user.scoutId,
+            fullName: nameChanged ? newName : null,
+            role: roleChanged ? newRole : null,
+            password: pwChanged ? newPassword : null,
+          );
+
+      final displayName = nameChanged ? newName! : user.fullName;
+
+      // If the admin just changed their own role or name, refresh the
+      // auth session so the JWT matches. The router listens to
+      // authControllerProvider — if role flipped to scout, GoRouter's
+      // redirect will automatically kick them out of /a/* routes.
+      final currentUser = ref.read(currentUserProvider);
+      final editedSelf =
+          currentUser != null && currentUser.scoutId == user.scoutId;
+
+      if (editedSelf && (roleChanged || nameChanged)) {
+        try {
+          await ref.read(authControllerProvider.notifier).refreshSession();
+        } catch (_) {
+          // If refresh fails the stale JWT will 401 on the next call
+          // and the error handler will push to login. No action needed.
+        }
+      }
+
+      if (!mounted) return;
+      AppToast.of(context).show(
+        AppToastData.success(
+          title: 'User Updated',
+          subtitle: '$displayName\'s profile saved',
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.of(context).show(
+        AppToastData.error(
+          title: 'Update Failed',
+          subtitle: _apiErrorMessage(e),
+        ),
+      );
+    }
+  }
+
+  Future<void> _onDelete(ManagedUser user) async {
+    if (user.isSuperAdmin) return;
+
+    final currentUser = ref.read(currentUserProvider);
+    final isDeletingSelf =
+        currentUser != null && currentUser.scoutId == user.scoutId;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          isDeletingSelf
+              ? 'Delete your own account?'
+              : 'Delete ${user.fullName}?',
+        ),
+        content: Text(
+          isDeletingSelf
+              ? 'You will be logged out immediately and will not be able to sign back in.'
+              : 'This action cannot be undone. The user will lose access immediately.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(isDeletingSelf ? 'Delete & Log Out' : 'Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await ref.read(usersProvider.notifier).deleteUser(user.scoutId);
+
+      if (isDeletingSelf) {
+        await ref.read(authControllerProvider.notifier).logout();
+        return;
+      }
+
+      if (!mounted) return;
+      AppToast.of(context).show(
+        AppToastData.success(
+          title: 'User Deleted',
+          subtitle: '${user.fullName} removed from the team',
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.of(context).show(
+        AppToastData.error(
+          title: 'Deletion Failed',
+          subtitle: _apiErrorMessage(e),
+        ),
+      );
+    }
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
@@ -53,26 +244,11 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
     final mediaTop = MediaQuery.of(context).padding.top;
     final safeBottom = MediaQuery.of(context).padding.bottom;
 
-    final q = _query.trim().toLowerCase();
-    final items = q.isEmpty
-        ? _seed
-        : _seed
-              .where(
-                (m) =>
-                    m.name.toLowerCase().contains(q) ||
-                    m.id.toLowerCase().contains(q),
-              )
-              .toList(growable: false);
-
-    final scoutCount = _seed.where((m) => m.role == MemberRole.scout).length;
-    final adminCount = _seed.where((m) => m.role == MemberRole.admin).length;
-
-    final isEmpty = items.isEmpty;
-
-    // Match AdminShell bottom nav footprint (height 78 + padding 12)
     const navHeight = 78.0;
     const navPad = 12.0;
     final bottomFootprint = safeBottom + navHeight + navPad + 10;
+
+    final usersAsync = ref.watch(usersProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -81,212 +257,209 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
           const Positioned.fill(child: DottedBackground()),
           SafeArea(
             top: false,
-            child: CustomScrollView(
-              cacheExtent: 900,
-              slivers: [
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
-                    child: _UsersHeader(
-                      onAdd: () async {
-                        final res = await context.push<Map<String, dynamic>>(
-                          AppRoutes.adminUserCreate,
-                        );
-                        if (!mounted || res == null) return;
+            child: usersAsync.when(
+              // ── Loading ────────────────────────────────────────────────
+              loading: () => const Center(child: CircularProgressIndicator()),
 
-                        final id = (res['scoutId'] ?? '').toString();
-                        final name = (res['displayName'] ?? '').toString();
-                        final roleStr = (res['role'] ?? 'scout').toString();
-                        final role = roleStr == 'admin'
-                            ? MemberRole.admin
-                            : MemberRole.scout;
-
-                        // Prevent duplicates in the mock list.
-                        final exists = _seed.any((m) => m.id == id);
-                        if (exists) {
-                          return;
-                        }
-
-                        setState(() {
-                          _seed.add(TeamMember(id: id, name: name, role: role));
-                          _seed.sort(
-                            (a, b) => a.name.toLowerCase().compareTo(
-                              b.name.toLowerCase(),
-                            ),
-                          );
-                        });
-                      },
-                    ),
-                  ),
-                ),
-
-                // ✅ FIX #1: Sticky search with transparent header background
-                SliverPersistentHeader(
-                  pinned: true,
-                  delegate: _StickyHeaderDelegate(
-                    height: 70,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-                      child: _SearchCard(
-                        controller: _searchCtrl,
-                        hintText: 'Search by name or ID…',
-                        onChanged: (v) => setState(() => _query = v),
+              // ── Error ──────────────────────────────────────────────────
+              error: (err, _) => Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('😵', style: emojiBase.copyWith(fontSize: 54)),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Failed to load users',
+                        style: t.titleLarge,
+                        textAlign: TextAlign.center,
                       ),
-                    ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _apiErrorMessage(err),
+                        style: t.bodyLarge?.copyWith(color: AppColors.muted),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 20),
+                      OutlinedButton.icon(
+                        onPressed: () => ref.invalidate(usersProvider),
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: const Text('Retry'),
+                      ),
+                    ],
                   ),
                 ),
+              ),
 
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                    child: _StatsRow(
-                      scoutCount: scoutCount,
-                      adminCount: adminCount,
-                    ),
-                  ),
-                ),
+              // ── Data ───────────────────────────────────────────────────
+              data: (allUsers) {
+                final items = _filterAndSort(allUsers);
+                final scoutCount = allUsers
+                    .where((u) => !u.role.isAdmin)
+                    .length;
+                final adminCount = allUsers.where((u) => u.role.isAdmin).length;
+                final isEmpty = items.isEmpty;
 
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                    child: Row(
-                      children: [
-                        Expanded(
+                return RefreshIndicator(
+                  color: AppColors.primary,
+                  onRefresh: () async {
+                    ref.invalidate(usersProvider);
+                    // Wait for the new fetch to complete before
+                    // the spinner dismisses.
+                    await ref.read(usersProvider.future);
+                  },
+                  child: CustomScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    cacheExtent: 900,
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            20,
+                            mediaTop + 10,
+                            20,
+                            0,
+                          ),
+                          child: _UsersHeader(
+                            onAdd: _onAdd,
+                            onRefresh: () async {
+                              ref.invalidate(usersProvider);
+                              await ref.read(usersProvider.future);
+                            },
+                          ),
+                        ),
+                      ),
+
+                      SliverPersistentHeader(
+                        pinned: true,
+                        delegate: _StickyHeaderDelegate(
+                          height: 70,
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+                            child: _SearchCard(
+                              controller: _searchCtrl,
+                              hintText: 'Search by name or ID…',
+                              onChanged: (v) => setState(() => _query = v),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                          child: _StatsRow(
+                            scoutCount: scoutCount,
+                            adminCount: adminCount,
+                          ),
+                        ),
+                      ),
+
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'ALL USERS',
+                                  style: t.labelMedium?.copyWith(
+                                    color: AppColors.muted,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                'ROLE',
+                                style: t.labelMedium?.copyWith(
+                                  color: AppColors.muted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      if (isEmpty)
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(20, 40, 20, 0),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    '🫂',
+                                    style: emojiBase.copyWith(fontSize: 54),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    'No users found',
+                                    style: t.titleLarge,
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Try a different name or Scout ID',
+                                    style: t.bodyLarge?.copyWith(
+                                      color: AppColors.muted,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                          sliver: SliverList(
+                            delegate: SliverChildBuilderDelegate(
+                              (context, index) {
+                                final user = items[index];
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: RepaintBoundary(
+                                    child: _ExpandableMemberCard(
+                                      user: user,
+                                      expanded: _exp(user.scoutId),
+                                      radiusXl: tokens.radiusXl,
+                                      onEdit: () => _onEdit(user),
+                                      onDelete: () => _onDelete(user),
+                                    ),
+                                  ),
+                                );
+                              },
+                              childCount: items.length,
+                              addAutomaticKeepAlives: false,
+                              addRepaintBoundaries: true,
+                              addSemanticIndexes: false,
+                            ),
+                          ),
+                        ),
+
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 10, 20, 8),
                           child: Text(
-                            'ALL USERS',
-                            style: t.labelMedium?.copyWith(
+                            '${allUsers.length} Total Users',
+                            style: t.titleMedium?.copyWith(
                               color: AppColors.muted,
+                              fontWeight: FontWeight.w800,
                             ),
                           ),
                         ),
-                        Text(
-                          'ROLE',
-                          style: t.labelMedium?.copyWith(
-                            color: AppColors.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                if (isEmpty)
-                  SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 40, 20, 0),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('🫂', style: emojiBase.copyWith(fontSize: 54)),
-                            const SizedBox(height: 10),
-                            Text(
-                              'No users found',
-                              style: t.titleLarge,
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Try a different name or Scout ID',
-                              style: t.bodyLarge?.copyWith(
-                                color: AppColors.muted,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
                       ),
-                    ),
-                  )
-                else
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-                    sliver: SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                          final m = items[index];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: RepaintBoundary(
-                              child: _ExpandableMemberCard(
-                                member: m,
-                                expanded: _exp(m.id),
-                                radiusXl: tokens.radiusXl,
-                                onEdit: () async {
-                                  final res = await context
-                                      .push<Map<String, dynamic>>(
-                                        AppRoutes.adminUserEdit(m.id),
-                                        extra: UserUpsertArgs(
-                                          scoutId: m.id,
-                                          displayName: m.name,
-                                          role: m.role == MemberRole.admin
-                                              ? 'admin'
-                                              : 'scout',
-                                        ),
-                                      );
 
-                                  if (!mounted || res == null) return;
-
-                                  final name = (res['displayName'] ?? m.name)
-                                      .toString();
-                                  final roleStr =
-                                      (res['role'] ??
-                                              (m.role == MemberRole.admin
-                                                  ? 'admin'
-                                                  : 'scout'))
-                                          .toString();
-                                  final role = roleStr == 'admin'
-                                      ? MemberRole.admin
-                                      : MemberRole.scout;
-
-                                  setState(() {
-                                    final i = _seed.indexWhere(
-                                      (x) => x.id == m.id,
-                                    );
-                                    if (i != -1) {
-                                      _seed[i] = TeamMember(
-                                        id: m.id,
-                                        name: name,
-                                        role: role,
-                                      );
-                                      _seed.sort(
-                                        (a, b) => a.name
-                                            .toLowerCase()
-                                            .compareTo(b.name.toLowerCase()),
-                                      );
-                                    }
-                                  });
-                                },
-                                onPromoteDemote: () {},
-                              ),
-                            ),
-                          );
-                        },
-                        childCount: items.length,
-                        addAutomaticKeepAlives: false,
-                        addRepaintBoundaries: true,
-                        addSemanticIndexes: false,
+                      SliverToBoxAdapter(
+                        child: SizedBox(height: bottomFootprint),
                       ),
-                    ),
+                    ],
                   ),
-
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 10, 20, 8),
-                    child: Text(
-                      '${_seed.length} Total Users',
-                      style: t.titleMedium?.copyWith(
-                        color: AppColors.muted,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ),
-
-                // ✅ FIX #3: tighter bottom spacer (matches nav footprint)
-                SliverToBoxAdapter(child: SizedBox(height: bottomFootprint)),
-              ],
+                );
+              },
             ),
           ),
         ],
@@ -295,10 +468,32 @@ class _UsersAdminPageState extends State<UsersAdminPage> {
   }
 }
 
-class _UsersHeader extends StatelessWidget {
-  const _UsersHeader({required this.onAdd});
+// ═══════════════════════════════════════════════════════════════════════════
+// Private widgets
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _UsersHeader extends StatefulWidget {
+  const _UsersHeader({required this.onAdd, required this.onRefresh});
 
   final VoidCallback onAdd;
+  final Future<void> Function() onRefresh;
+
+  @override
+  State<_UsersHeader> createState() => _UsersHeaderState();
+}
+
+class _UsersHeaderState extends State<_UsersHeader> {
+  bool _refreshing = false;
+
+  Future<void> _handleRefresh() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    try {
+      await widget.onRefresh();
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -325,6 +520,30 @@ class _UsersHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 10),
+        // Refresh button
+        SizedBox(
+          width: 42,
+          height: 42,
+          child: _refreshing
+              ? const Padding(
+                  padding: EdgeInsets.all(10),
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                )
+              : IconButton(
+                  onPressed: _handleRefresh,
+                  icon: const Icon(Icons.refresh_rounded),
+                  color: AppColors.muted,
+                  splashRadius: 28,
+                  tooltip: 'Refresh',
+                  style: IconButton.styleFrom(
+                    splashFactory: NoSplash.splashFactory,
+                    hoverColor: Colors.transparent,
+                    highlightColor: Colors.transparent,
+                  ),
+                ),
+        ),
+        const SizedBox(width: 6),
+        // Add button
         DecoratedBox(
           decoration: BoxDecoration(
             color: AppColors.primary,
@@ -335,7 +554,7 @@ class _UsersHeader extends StatelessWidget {
             width: 42,
             height: 42,
             child: IconButton(
-              onPressed: onAdd,
+              onPressed: widget.onAdd,
               icon: const Icon(Icons.add_rounded, color: Colors.white),
               splashRadius: 28,
               tooltip: 'Add user',
@@ -504,28 +723,33 @@ class _SearchCard extends StatelessWidget {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Expandable member card — Edit + Delete (red)
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _ExpandableMemberCard extends StatelessWidget {
   const _ExpandableMemberCard({
-    required this.member,
+    required this.user,
     required this.expanded,
     required this.radiusXl,
     required this.onEdit,
-    required this.onPromoteDemote,
+    required this.onDelete,
   });
 
-  final TeamMember member;
+  final ManagedUser user;
   final ValueNotifier<bool> expanded;
   final double radiusXl;
 
   final VoidCallback onEdit;
-  final VoidCallback onPromoteDemote;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
 
-    final isAdmin = member.role == MemberRole.admin;
-    final initials = _initials(member.name);
+    final isAdmin = user.role.isAdmin;
+    final isSuperAdmin = user.isSuperAdmin;
+    final initials = _initials(user.fullName);
 
     final nameStyle = t.titleMedium?.copyWith(
       fontSize: 17,
@@ -538,7 +762,11 @@ class _ExpandableMemberCard extends StatelessWidget {
       fontWeight: FontWeight.w600,
     );
 
-    final stripColor = isAdmin ? AppColors.primary : const Color(0xFFE1E6ED);
+    final stripColor = isSuperAdmin
+        ? const Color(0xFFFFB300) // Gold for super admin.
+        : isAdmin
+        ? AppColors.primary
+        : const Color(0xFFE1E6ED);
 
     return ValueListenableBuilder<bool>(
       valueListenable: expanded,
@@ -574,6 +802,16 @@ class _ExpandableMemberCard extends StatelessWidget {
                             ),
                           ),
                         ),
+                        if (isSuperAdmin)
+                          const Positioned(
+                            right: -4,
+                            bottom: -2,
+                            child: Icon(
+                              Icons.shield_rounded,
+                              size: 16,
+                              color: Color(0xFFFFB300),
+                            ),
+                          ),
                       ],
                     ),
                     const SizedBox(width: 12),
@@ -584,14 +822,14 @@ class _ExpandableMemberCard extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              member.name,
+                              user.fullName,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: nameStyle,
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              "ID: #${member.id}",
+                              'ID: #${user.scoutId}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: subtitleStyle,
@@ -605,7 +843,10 @@ class _ExpandableMemberCard extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          _RoleChip(role: member.role),
+                          _RoleChip(
+                            role: user.role,
+                            isSuperAdmin: isSuperAdmin,
+                          ),
                           const SizedBox(height: 8),
                           Icon(
                             isOpen
@@ -624,12 +865,9 @@ class _ExpandableMemberCard extends StatelessWidget {
                       : CrossFadeState.showFirst,
                   duration: const Duration(milliseconds: 160),
                   firstChild: const SizedBox.shrink(),
-                  // ✅ FIX #2: details block white so buttons are clear
-                  secondChild: _MemberDetailsBlock(
-                    isAdmin: isAdmin,
-                    onEdit: onEdit,
-                    onPromoteDemote: onPromoteDemote,
-                  ),
+                  secondChild: isSuperAdmin
+                      ? const _ProtectedDetailsBlock()
+                      : _MemberDetailsBlock(onEdit: onEdit, onDelete: onDelete),
                 ),
               ],
             ),
@@ -640,16 +878,47 @@ class _ExpandableMemberCard extends StatelessWidget {
   }
 }
 
-class _MemberDetailsBlock extends StatelessWidget {
-  const _MemberDetailsBlock({
-    required this.isAdmin,
-    required this.onEdit,
-    required this.onPromoteDemote,
-  });
+/// Locked notice for the super admin — no action buttons.
+class _ProtectedDetailsBlock extends StatelessWidget {
+  const _ProtectedDetailsBlock();
 
-  final bool isAdmin;
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: AppColors.outline)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.lock_rounded, size: 18, color: AppColors.muted),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Super Admin — this account cannot be edited or deleted.',
+              style: t.bodyMedium?.copyWith(
+                color: AppColors.muted,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Edit + Delete row — same two-column layout as before, but Delete (red)
+/// replaces promote/demote.
+class _MemberDetailsBlock extends StatelessWidget {
+  const _MemberDetailsBlock({required this.onEdit, required this.onDelete});
+
   final VoidCallback onEdit;
-  final VoidCallback onPromoteDemote;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -681,15 +950,12 @@ class _MemberDetailsBlock extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: OutlinedButton.icon(
-              onPressed: onPromoteDemote,
-              icon: Icon(
-                isAdmin
-                    ? Icons.arrow_downward_rounded
-                    : Icons.arrow_upward_rounded,
-              ),
-              label: Text(isAdmin ? 'Demote' : 'Promote'),
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline_rounded),
+              label: const Text('Delete'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primary,
+                foregroundColor: Colors.red.shade700,
+                side: BorderSide(color: Colors.red.shade200),
                 minimumSize: const Size.fromHeight(46),
                 textStyle: t.titleMedium?.copyWith(
                   fontSize: 14,
@@ -705,27 +971,41 @@ class _MemberDetailsBlock extends StatelessWidget {
 }
 
 class _RoleChip extends StatelessWidget {
-  const _RoleChip({required this.role});
-  final MemberRole role;
+  const _RoleChip({required this.role, this.isSuperAdmin = false});
+  final UserRole role;
+  final bool isSuperAdmin;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final isAdmin = role == MemberRole.admin;
+    final isAdmin = role.isAdmin;
+
+    final bg = isSuperAdmin
+        ? const Color(0xFFFFF3D0)
+        : isAdmin
+        ? AppColors.primary
+        : Colors.white;
+    final fg = isSuperAdmin
+        ? const Color(0xFF8B6914)
+        : isAdmin
+        ? Colors.white
+        : AppColors.muted;
+    final label = isSuperAdmin ? 'OWNER' : (isAdmin ? 'ADMIN' : 'SCOUT');
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: isAdmin ? AppColors.primary : Colors.white,
+        color: bg,
         borderRadius: BorderRadius.circular(999),
-        border: isAdmin ? null : Border.all(color: AppColors.outline),
+        border: isSuperAdmin
+            ? Border.all(color: const Color(0xFFFFB300))
+            : isAdmin
+            ? null
+            : Border.all(color: AppColors.outline),
       ),
       child: Text(
-        isAdmin ? 'ADMIN' : 'SCOUT',
-        style: t.labelMedium?.copyWith(
-          color: isAdmin ? Colors.white : AppColors.muted,
-          letterSpacing: 1.4,
-        ),
+        label,
+        style: t.labelMedium?.copyWith(color: fg, letterSpacing: 1.4),
       ),
     );
   }
@@ -739,7 +1019,6 @@ class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   double get minExtent => height;
-
   @override
   double get maxExtent => height;
 
@@ -759,43 +1038,11 @@ class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
 }
 
 String _initials(String name) {
-  final parts = name.trim().split(RegExp(r"\s+"));
-  if (parts.isEmpty) return "?";
+  final parts = name.trim().split(RegExp(r'\s+'));
+  if (parts.isEmpty) return '?';
   if (parts.length == 1) {
     return parts.first.characters.take(2).toString().toUpperCase();
   }
-  return "${parts.first.characters.first}${parts.last.characters.first}"
+  return '${parts.first.characters.first}${parts.last.characters.first}'
       .toUpperCase();
-}
-
-List<TeamMember> _mockMembers() {
-  return const <TeamMember>[
-    TeamMember(id: '8821', name: 'Sarah Jenkins', role: MemberRole.admin),
-    TeamMember(id: '9942', name: 'Mike Ross', role: MemberRole.scout),
-    TeamMember(id: '9102', name: 'David Chen', role: MemberRole.scout),
-    TeamMember(id: '7731', name: 'Alex Liu', role: MemberRole.scout),
-    TeamMember(id: '3321', name: 'Emily Rose', role: MemberRole.scout),
-    TeamMember(id: '1044', name: 'Nora Khalil', role: MemberRole.scout),
-    TeamMember(id: '1180', name: 'Omar Farid', role: MemberRole.scout),
-    TeamMember(id: '1207', name: 'Maya Haddad', role: MemberRole.scout),
-    TeamMember(id: '1312', name: 'Karim Nassar', role: MemberRole.scout),
-    TeamMember(id: '1455', name: 'Layla Saad', role: MemberRole.scout),
-    TeamMember(id: '1566', name: 'Hadi Mansour', role: MemberRole.scout),
-    TeamMember(id: '1601', name: 'Jana Youssef', role: MemberRole.scout),
-    TeamMember(id: '1718', name: 'Fadi Salim', role: MemberRole.scout),
-    TeamMember(id: '1833', name: 'Tala Aoun', role: MemberRole.scout),
-    TeamMember(id: '1950', name: 'Rami Habib', role: MemberRole.scout),
-    TeamMember(id: '2039', name: 'Mariam Daher', role: MemberRole.scout),
-    TeamMember(id: '2144', name: 'Tony Ziad', role: MemberRole.scout),
-    TeamMember(id: '2277', name: 'Celine Rouhana', role: MemberRole.scout),
-    TeamMember(id: '2388', name: 'Elias Jabbour', role: MemberRole.scout),
-    TeamMember(id: '2499', name: 'Hala Fares', role: MemberRole.scout),
-    TeamMember(id: '2551', name: 'Ziad Bou Saab', role: MemberRole.admin),
-    TeamMember(id: '2610', name: 'Rita Nakhle', role: MemberRole.scout),
-    TeamMember(id: '2745', name: 'Samir Douaihy', role: MemberRole.scout),
-    TeamMember(id: '2871', name: 'Nada Chahine', role: MemberRole.scout),
-    TeamMember(id: '2924', name: 'Issa Melki', role: MemberRole.scout),
-    TeamMember(id: '3090', name: 'Nabil Gerges', role: MemberRole.scout),
-    TeamMember(id: '3166', name: 'Admin Ops', role: MemberRole.admin),
-  ];
 }

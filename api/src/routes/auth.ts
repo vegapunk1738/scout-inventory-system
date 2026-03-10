@@ -113,7 +113,7 @@ authRoutes.post("/refresh", authAllowExpired(), async (c) => {
   const payload = c.get("jwtPayload");
   const db = c.get("db");
 
-  // Re-fetch from DB to pick up any role/name changes
+  // Re-fetch from DB to pick up any role/name chang es
   const user = (
     await db
       .select()

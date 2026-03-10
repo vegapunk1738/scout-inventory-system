@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../core/api_client.dart';
+import '../api/api_client.dart';
 import '../../domain/models/auth_session.dart';
 
 class AuthException implements Exception {

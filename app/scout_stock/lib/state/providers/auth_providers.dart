@@ -41,6 +41,14 @@ class AuthController extends AsyncNotifier<AuthSession?> {
     await repo.logout();
     state = const AsyncData(null);
   }
+
+  /// Re-fetches a fresh JWT from the backend (picks up role/name changes).
+  /// Updates the local session state so GoRouter and all watchers react.
+  Future<void> refreshSession() async {
+    final repo = ref.read(authRepositoryProvider);
+    final refreshed = await repo.refresh();
+    state = AsyncData(refreshed);
+  }
 }
 
 final authControllerProvider =

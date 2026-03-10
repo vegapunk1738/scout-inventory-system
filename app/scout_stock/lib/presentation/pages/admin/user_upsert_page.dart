@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:scout_stock/domain/models/managed_user.dart'
+    show kSuperAdminScoutId;
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
 import 'package:scout_stock/theme/app_theme.dart';
@@ -10,7 +12,7 @@ import 'package:scout_stock/theme/app_theme.dart';
 import '../../widgets/attention_text_field_widget.dart';
 
 /// Navigation args for editing an existing user.
-/// (For create, push the route with no extra.)
+/// For create mode, push the route with no extra.
 class UserUpsertArgs {
   const UserUpsertArgs({
     required this.scoutId,
@@ -30,11 +32,13 @@ enum _UserRole { scout, admin }
 extension on _UserRole {
   String get apiValue => this == _UserRole.admin ? 'admin' : 'scout';
   String get label => this == _UserRole.admin ? 'Admin' : 'Scout';
-  IconData get icon =>
-      this == _UserRole.admin ? Icons.shield_rounded : Icons.directions_walk_rounded;
+  IconData get icon => this == _UserRole.admin
+      ? Icons.shield_rounded
+      : Icons.directions_walk_rounded;
 }
 
-_UserRole _roleFromApi(String raw) => raw == 'admin' ? _UserRole.admin : _UserRole.scout;
+_UserRole _roleFromApi(String raw) =>
+    raw == 'admin' ? _UserRole.admin : _UserRole.scout;
 
 class UserUpsertPage extends StatefulWidget {
   const UserUpsertPage({super.key, this.editArgs});
@@ -76,6 +80,10 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
 
   bool get _isEdit => widget.editArgs != null;
 
+  /// Derived from the scout_id constant — no extra arg needed.
+  bool get _isSuperAdmin =>
+      _isEdit && widget.editArgs!.scoutId == kSuperAdminScoutId;
+
   @override
   void initState() {
     super.initState();
@@ -95,7 +103,7 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _nameFocus.requestFocus();
+      if (mounted && !_isSuperAdmin) _nameFocus.requestFocus();
     });
   }
 
@@ -125,7 +133,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
   }
 
   String _generateScoutId() {
-    // Simple local generator (server can be the source of truth later).
     final r = math.Random();
     return (1000 + r.nextInt(9000)).toString();
   }
@@ -151,7 +158,7 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
   }
 
   Future<void> _submit() async {
-    if (_saving) return;
+    if (_saving || _isSuperAdmin) return;
 
     final name = _nameCtrl.text.trim();
     final rawId = _idCtrl.text.trim();
@@ -175,7 +182,7 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
       return;
     }
 
-    // Create payload
+    // Create payload — pop result to caller (UsersPage calls the API).
     if (!_isEdit) {
       String pw = _passwordCtrl.text;
       if (pw.trim().isEmpty) {
@@ -186,7 +193,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
       setState(() => _saving = true);
       FocusScope.of(context).unfocus();
 
-      // Return a result (caller can call the API + update UI).
       context.pop<Map<String, dynamic>>({
         'displayName': name,
         'scoutId': scoutId,
@@ -196,7 +202,7 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
       return;
     }
 
-    // Edit payload
+    // Edit payload.
     final newPw = _newPasswordCtrl.text;
     final confirm = _confirmPasswordCtrl.text;
 
@@ -204,6 +210,11 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
     if (wantsPwChange && newPw != confirm) {
       await _newPwKey.currentState?.triggerInvalid();
       await _confirmPwKey.currentState?.triggerInvalid(haptics: false);
+      return;
+    }
+
+    if (wantsPwChange && newPw.trim().length < 6) {
+      await _newPwKey.currentState?.triggerInvalid();
       return;
     }
 
@@ -224,12 +235,14 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
     final t = Theme.of(context).textTheme;
 
     final title = _isEdit ? 'Edit User' : 'Create New User';
-    final subtitle = _isEdit
+    final subtitle = _isSuperAdmin
+        ? 'This is the Super Admin account. It cannot be modified.'
+        : _isEdit
         ? 'Update the details for this team member.'
         : 'Fill in the details to add a new team member.';
 
     return Scaffold(
-      resizeToAvoidBottomInset: false, 
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -251,16 +264,59 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                 const SizedBox(height: 10),
                 Text(
                   subtitle,
-                  style: t.bodyLarge?.copyWith(color: AppColors.muted),
+                  style: t.bodyLarge?.copyWith(
+                    color: _isSuperAdmin
+                        ? Colors.orange.shade800
+                        : AppColors.muted,
+                  ),
                 ),
+
+                // ── Super Admin banner ─────────────────────────────────
+                if (_isSuperAdmin) ...[
+                  const SizedBox(height: 20),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF3D0),
+                      borderRadius: BorderRadius.circular(tokens.radiusLg),
+                      border: Border.all(color: const Color(0xFFFFB300)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.lock_rounded,
+                          color: Color(0xFF8B6914),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'This account is protected. Name, role, and credentials cannot be changed.',
+                            style: t.bodyMedium?.copyWith(
+                              color: const Color(0xFF8B6914),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
                 const SizedBox(height: 28),
 
+                // ── Role ───────────────────────────────────────────────
                 Text('Role Selection', style: t.titleMedium),
                 const SizedBox(height: 12),
-                _RoleSegmented(
-                  radius: tokens.radiusXl,
-                  value: _role,
-                  onChanged: (r) => setState(() => _role = r),
+                IgnorePointer(
+                  ignoring: _isSuperAdmin,
+                  child: Opacity(
+                    opacity: _isSuperAdmin ? 0.5 : 1.0,
+                    child: _RoleSegmented(
+                      radius: tokens.radiusXl,
+                      value: _role,
+                      onChanged: (r) => setState(() => _role = r),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Text(
@@ -269,13 +325,14 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                 ),
                 const SizedBox(height: 26),
 
+                // ── Full Name ──────────────────────────────────────────
                 Text('Full Name', style: t.titleMedium),
                 const SizedBox(height: 10),
                 AttentionTextField(
                   key: _nameKey,
                   controller: _nameCtrl,
                   focusNode: _nameFocus,
-                  autofocus: true,
+                  autofocus: !_isSuperAdmin,
                   hintText: 'e.g. Ahmad Mohsen',
                   centeredLayout: false,
                   textAlign: TextAlign.start,
@@ -285,17 +342,23 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                   allowPattern: r'[^\n]',
                   uppercase: false,
                   maxLength: 48,
+                  readOnly: _isSuperAdmin,
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 18,
                     vertical: 18,
                   ),
                   textStyle: _fieldTextStyle(context),
                   hintStyle: _hintStyle(context),
-                  suffixIcon: const Icon(Icons.person_rounded, color: AppColors.muted),
+                  suffixIcon: const Icon(
+                    Icons.person_rounded,
+                    color: AppColors.muted,
+                  ),
                   onSubmitted: (_) => _idFocus.requestFocus(),
                 ),
 
                 const SizedBox(height: 18),
+
+                // ── Scout ID ───────────────────────────────────────────
                 Text('Scout ID', style: t.titleMedium),
                 const SizedBox(height: 10),
                 AttentionTextField(
@@ -307,18 +370,23 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                   textAlign: TextAlign.start,
                   textCapitalization: TextCapitalization.none,
                   keyboardType: TextInputType.number,
-                  textInputAction: _isEdit ? TextInputAction.done : TextInputAction.next,
+                  textInputAction: _isEdit
+                      ? TextInputAction.done
+                      : TextInputAction.next,
                   allowPattern: r'[0-9]',
                   uppercase: false,
                   maxLength: 10,
-                  readOnly: _isEdit,
+                  readOnly: _isEdit, // scout_id is immutable after creation.
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 18,
                     vertical: 18,
                   ),
                   textStyle: _fieldTextStyle(context),
                   hintStyle: _hintStyle(context),
-                  suffixIcon: const Icon(Icons.badge_rounded, color: AppColors.muted),
+                  suffixIcon: const Icon(
+                    Icons.badge_rounded,
+                    color: AppColors.muted,
+                  ),
                   onSubmitted: (_) {
                     if (_isEdit) _submit();
                   },
@@ -326,135 +394,148 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                 const SizedBox(height: 8),
                 Text(
                   _isEdit
-                      ? 'ID is the primary identifier and can’t be changed here.'
+                      ? 'ID is the primary identifier and can\'t be changed here.'
                       : 'Auto-generated if left blank.',
                   style: t.bodyMedium?.copyWith(color: AppColors.muted),
                 ),
 
                 const SizedBox(height: 24),
 
-                if (!_isEdit) ...[
-                  Text('Password', style: t.titleMedium),
-                  const SizedBox(height: 10),
-                  AttentionTextField(
-                    key: _pwKey,
-                    controller: _passwordCtrl,
-                    hintText: 'Temp-1287!',
-                    centeredLayout: false,
-                    textAlign: TextAlign.start,
-                    textCapitalization: TextCapitalization.none,
-                    keyboardType: TextInputType.visiblePassword,
-                    textInputAction: TextInputAction.done,
-                    allowPattern: r'[^\n]',
-                    uppercase: false,
-                    maxLength: 64,
-                    obscureText: _pwObscure,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 18,
-                    ),
-                    textStyle: _fieldTextStyle(context),
-                    hintStyle: _hintStyle(context),
-                    onChanged: (_) => _pwTouched = true,
-                    suffixIcon: IconButton(
-                      onPressed: () => setState(() => _pwObscure = !_pwObscure),
-                      icon: Icon(
-                        _pwObscure ? Icons.visibility_rounded : Icons.visibility_off_rounded,
-                        color: AppColors.muted,
+                // ── Password fields (hidden for super admin) ───────────
+                if (!_isSuperAdmin) ...[
+                  if (!_isEdit) ...[
+                    Text('Password', style: t.titleMedium),
+                    const SizedBox(height: 10),
+                    AttentionTextField(
+                      key: _pwKey,
+                      controller: _passwordCtrl,
+                      hintText: 'Temp-1287!',
+                      centeredLayout: false,
+                      textAlign: TextAlign.start,
+                      textCapitalization: TextCapitalization.none,
+                      keyboardType: TextInputType.visiblePassword,
+                      textInputAction: TextInputAction.done,
+                      allowPattern: r'[^\n]',
+                      uppercase: false,
+                      maxLength: 64,
+                      obscureText: _pwObscure,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 18,
                       ),
-                      splashRadius: 22,
-                    ),
-                    onSubmitted: (_) => _submit(),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Default password is Temp-{ID}!. You can change it before creating.',
-                    style: t.bodyMedium?.copyWith(color: AppColors.muted),
-                  ),
-                ] else ...[
-                  Text('New Password', style: t.titleMedium),
-                  const SizedBox(height: 10),
-                  AttentionTextField(
-                    key: _newPwKey,
-                    controller: _newPasswordCtrl,
-                    hintText: 'Leave blank to keep current password',
-                    centeredLayout: false,
-                    textAlign: TextAlign.start,
-                    textCapitalization: TextCapitalization.none,
-                    keyboardType: TextInputType.visiblePassword,
-                    textInputAction: TextInputAction.next,
-                    allowPattern: r'[^\n]',
-                    uppercase: false,
-                    maxLength: 64,
-                    obscureText: _newPwObscure,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 18,
-                    ),
-                    textStyle: _fieldTextStyle(context),
-                    hintStyle: _hintStyle(context),
-                    suffixIcon: IconButton(
-                      onPressed: () => setState(() => _newPwObscure = !_newPwObscure),
-                      icon: Icon(
-                        _newPwObscure ? Icons.visibility_rounded : Icons.visibility_off_rounded,
-                        color: AppColors.muted,
+                      textStyle: _fieldTextStyle(context),
+                      hintStyle: _hintStyle(context),
+                      onChanged: (_) => _pwTouched = true,
+                      suffixIcon: IconButton(
+                        onPressed: () =>
+                            setState(() => _pwObscure = !_pwObscure),
+                        icon: Icon(
+                          _pwObscure
+                              ? Icons.visibility_rounded
+                              : Icons.visibility_off_rounded,
+                          color: AppColors.muted,
+                        ),
+                        splashRadius: 22,
                       ),
-                      splashRadius: 22,
+                      onSubmitted: (_) => _submit(),
                     ),
-                    onSubmitted: (_) {},
-                  ),
-                  const SizedBox(height: 18),
-                  Text('Confirm New Password', style: t.titleMedium),
-                  const SizedBox(height: 10),
-                  AttentionTextField(
-                    key: _confirmPwKey,
-                    controller: _confirmPasswordCtrl,
-                    hintText: 'Re-type the new password',
-                    centeredLayout: false,
-                    textAlign: TextAlign.start,
-                    textCapitalization: TextCapitalization.none,
-                    keyboardType: TextInputType.visiblePassword,
-                    textInputAction: TextInputAction.done,
-                    allowPattern: r'[^\n]',
-                    uppercase: false,
-                    maxLength: 64,
-                    obscureText: _confirmPwObscure,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 18,
+                    const SizedBox(height: 8),
+                    Text(
+                      'Default password is Temp-{ID}!. You can change it before creating.',
+                      style: t.bodyMedium?.copyWith(color: AppColors.muted),
                     ),
-                    textStyle: _fieldTextStyle(context),
-                    hintStyle: _hintStyle(context),
-                    suffixIcon: IconButton(
-                      onPressed: () => setState(() => _confirmPwObscure = !_confirmPwObscure),
-                      icon: Icon(
-                        _confirmPwObscure
-                            ? Icons.visibility_rounded
-                            : Icons.visibility_off_rounded,
-                        color: AppColors.muted,
+                  ] else ...[
+                    Text('New Password', style: t.titleMedium),
+                    const SizedBox(height: 10),
+                    AttentionTextField(
+                      key: _newPwKey,
+                      controller: _newPasswordCtrl,
+                      hintText: 'Leave blank to keep current password',
+                      centeredLayout: false,
+                      textAlign: TextAlign.start,
+                      textCapitalization: TextCapitalization.none,
+                      keyboardType: TextInputType.visiblePassword,
+                      textInputAction: TextInputAction.next,
+                      allowPattern: r'[^\n]',
+                      uppercase: false,
+                      maxLength: 64,
+                      obscureText: _newPwObscure,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 18,
                       ),
-                      splashRadius: 22,
+                      textStyle: _fieldTextStyle(context),
+                      hintStyle: _hintStyle(context),
+                      suffixIcon: IconButton(
+                        onPressed: () =>
+                            setState(() => _newPwObscure = !_newPwObscure),
+                        icon: Icon(
+                          _newPwObscure
+                              ? Icons.visibility_rounded
+                              : Icons.visibility_off_rounded,
+                          color: AppColors.muted,
+                        ),
+                        splashRadius: 22,
+                      ),
+                      onSubmitted: (_) {},
                     ),
-                    onSubmitted: (_) => _submit(),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Leave both password fields empty to keep the current password.',
-                    style: t.bodyMedium?.copyWith(color: AppColors.muted),
-                  ),
+                    const SizedBox(height: 18),
+                    Text('Confirm New Password', style: t.titleMedium),
+                    const SizedBox(height: 10),
+                    AttentionTextField(
+                      key: _confirmPwKey,
+                      controller: _confirmPasswordCtrl,
+                      hintText: 'Re-type the new password',
+                      centeredLayout: false,
+                      textAlign: TextAlign.start,
+                      textCapitalization: TextCapitalization.none,
+                      keyboardType: TextInputType.visiblePassword,
+                      textInputAction: TextInputAction.done,
+                      allowPattern: r'[^\n]',
+                      uppercase: false,
+                      maxLength: 64,
+                      obscureText: _confirmPwObscure,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 18,
+                      ),
+                      textStyle: _fieldTextStyle(context),
+                      hintStyle: _hintStyle(context),
+                      suffixIcon: IconButton(
+                        onPressed: () => setState(
+                          () => _confirmPwObscure = !_confirmPwObscure,
+                        ),
+                        icon: Icon(
+                          _confirmPwObscure
+                              ? Icons.visibility_rounded
+                              : Icons.visibility_off_rounded,
+                          color: AppColors.muted,
+                        ),
+                        splashRadius: 22,
+                      ),
+                      onSubmitted: (_) => _submit(),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Leave both password fields empty to keep the current password.',
+                      style: t.bodyMedium?.copyWith(color: AppColors.muted),
+                    ),
+                  ],
                 ],
               ],
             ),
           ),
         ],
       ),
-      bottomNavigationBar: GlowingActionButton(
-        label: _isEdit ? 'Save Changes' : 'Create User',
-        icon: const Icon(Icons.check_rounded),
-        onPressed: _saving ? null : _submit,
-        loading: _saving,
-        respectKeyboardInset: false,
-      ),
+      bottomNavigationBar: _isSuperAdmin
+          ? null
+          : GlowingActionButton(
+              label: _isEdit ? 'Save Changes' : 'Create User',
+              icon: const Icon(Icons.check_rounded),
+              onPressed: _saving ? null : _submit,
+              loading: _saving,
+              respectKeyboardInset: false,
+            ),
     );
   }
 }
