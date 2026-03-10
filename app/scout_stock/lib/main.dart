@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,6 +11,12 @@ import 'package:scout_stock/theme/app_theme.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   GoogleFonts.config.allowRuntimeFetching = false;
+
+  // Lock to portrait on mobile — no-op on web (handled by max-width constraint).
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
 
   final prefs = await SharedPreferences.getInstance();
 
@@ -31,6 +38,37 @@ class MyApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       routerConfig: router,
+      // Constrain to mobile width only on wide screens (desktop / web browser).
+      // On iPhone / iPad the child renders full-width with zero overhead.
+      builder: (context, child) {
+        final screenWidth = MediaQuery.sizeOf(context).width;
+        const tabletMax = 1024.0;
+        const mobileMax = 430.0;
+
+        // Phone or tablet — no wrapper, no extra layers.
+        if (screenWidth <= tabletMax) return child!;
+
+        // Desktop / wide web — centered column with blurry edge shadow.
+        return ColoredBox(
+          color: AppColors.background,
+          child: Center(
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: mobileMax),
+              decoration: BoxDecoration(
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.ink.withValues(alpha: 0.08),
+                    blurRadius: 60,
+                    spreadRadius: 8,
+                  ),
+                ],
+              ),
+              clipBehavior: Clip.none,
+              child: child,
+            ),
+          ),
+        );
+      },
     );
   }
 }

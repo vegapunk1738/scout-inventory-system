@@ -17,6 +17,7 @@ import 'package:scout_stock/presentation/pages/manual_entry_page.dart';
 import 'package:scout_stock/presentation/pages/me_page.dart';
 import 'package:scout_stock/presentation/pages/scan_page.dart';
 import 'package:scout_stock/presentation/widgets/admin_shell.dart';
+import 'package:scout_stock/presentation/widgets/scout_shell.dart';
 import 'package:scout_stock/state/providers/auth_providers.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
@@ -114,20 +115,40 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const _AppErrorScreen(),
       ),
 
-      GoRoute(
-        path: AppRoutes.scan,
-        name: 'scan',
-        builder: (context, state) => const ScanPage(),
-      ),
-      GoRoute(
-        path: AppRoutes.cart,
-        name: 'cart',
-        builder: (context, state) => const CartPage(),
-      ),
-      GoRoute(
-        path: AppRoutes.me,
-        name: 'me',
-        builder: (context, state) => MePage(),
+      // Scout shell (tabs) — 3 tabs: Scan · Cart · Me
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) {
+          return ScoutRouterShell(navigationShell: navigationShell);
+        },
+        branches: [
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.scan,
+                name: 'scan',
+                builder: (context, state) => const ScanPage(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.cart,
+                name: 'cart',
+                builder: (context, state) => const CartPage(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.me,
+                name: 'me',
+                builder: (context, state) => MePage(),
+              ),
+            ],
+          ),
+        ],
       ),
 
       GoRoute(
