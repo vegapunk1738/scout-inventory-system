@@ -58,9 +58,32 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
         .toList(growable: false);
   }
 
-  String _apiErrorMessage(Object e) {
-    if (e is ApiException) return e.message;
-    return 'Something went wrong. Please try again.';
+  /// Shows error toasts. If the error has field-level validation details,
+  /// fires one toast per field so each is individually readable and
+  /// dismissible. Otherwise shows a single toast.
+  void _showError(Object e, {required String action}) {
+    if (e is ApiException && e.hasFieldErrors) {
+      final toast = AppToast.of(context);
+      // Stagger slightly so the Z-stack fans out nicely.
+      for (final fe in e.fieldErrors) {
+        toast.show(AppToastData.error(
+          title: fe.label,
+          subtitle: fe.message,
+          duration: const Duration(seconds: 6),
+        ));
+      }
+      return;
+    }
+
+    // Simple error — single toast.
+    final msg = e is ApiException
+        ? e.message
+        : 'Something went wrong. Please try again.';
+    AppToast.of(context).show(AppToastData.error(
+      title: action,
+      subtitle: msg,
+      duration: const Duration(seconds: 5),
+    ));
   }
 
   // ── Actions ────────────────────────────────────────────────────────────
@@ -86,20 +109,17 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
             role: role,
           );
       if (!mounted) return;
+
+      final roleLabel = role == 'admin' ? 'Admin' : 'Scout';
       AppToast.of(context).show(
         AppToastData.success(
-          title: 'User Created',
-          subtitle: '$fullName  ·  ID #$scoutId',
+          title: '$fullName joined the team',
+          subtitle: '$roleLabel  ·  ID #$scoutId',
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      AppToast.of(context).show(
-        AppToastData.error(
-          title: 'Creation Failed',
-          subtitle: _apiErrorMessage(e),
-        ),
-      );
+      _showError(e, action: 'Could not create $fullName');
     }
   }
 
@@ -136,12 +156,19 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
             password: pwChanged ? newPassword : null,
           );
 
+      // Build a descriptive subtitle about what exactly changed.
+      final changes = <String>[];
+      if (nameChanged) changes.add('${user.fullName} → $newName');
+      if (roleChanged) {
+        final oldLabel = user.role.isAdmin ? 'Admin' : 'Scout';
+        final newLabel = newRole == 'admin' ? 'Admin' : 'Scout';
+        changes.add('$oldLabel → $newLabel');
+      }
+      if (pwChanged) changes.add('Password reset');
+
       final displayName = nameChanged ? newName! : user.fullName;
 
-      // If the admin just changed their own role or name, refresh the
-      // auth session so the JWT matches. The router listens to
-      // authControllerProvider — if role flipped to scout, GoRouter's
-      // redirect will automatically kick them out of /a/* routes.
+      // If the admin changed their own role or name, refresh the JWT.
       final currentUser = ref.read(currentUserProvider);
       final editedSelf =
           currentUser != null && currentUser.scoutId == user.scoutId;
@@ -149,27 +176,19 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
       if (editedSelf && (roleChanged || nameChanged)) {
         try {
           await ref.read(authControllerProvider.notifier).refreshSession();
-        } catch (_) {
-          // If refresh fails the stale JWT will 401 on the next call
-          // and the error handler will push to login. No action needed.
-        }
+        } catch (_) {}
       }
 
       if (!mounted) return;
       AppToast.of(context).show(
         AppToastData.success(
-          title: 'User Updated',
-          subtitle: '$displayName\'s profile saved',
+          title: '$displayName updated',
+          subtitle: changes.join('  ·  '),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      AppToast.of(context).show(
-        AppToastData.error(
-          title: 'Update Failed',
-          subtitle: _apiErrorMessage(e),
-        ),
-      );
+      _showError(e, action: 'Could not update ${user.fullName}');
     }
   }
 
@@ -217,20 +236,16 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
       }
 
       if (!mounted) return;
+      final roleLabel = user.role.isAdmin ? 'Admin' : 'Scout';
       AppToast.of(context).show(
         AppToastData.success(
-          title: 'User Deleted',
-          subtitle: '${user.fullName} removed from the team',
+          title: '${user.fullName} removed',
+          subtitle: '$roleLabel #${user.scoutId} deleted from the team',
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      AppToast.of(context).show(
-        AppToastData.error(
-          title: 'Deletion Failed',
-          subtitle: _apiErrorMessage(e),
-        ),
-      );
+      _showError(e, action: 'Could not delete ${user.fullName}');
     }
   }
 
@@ -258,10 +273,8 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
           SafeArea(
             top: false,
             child: usersAsync.when(
-              // ── Loading ────────────────────────────────────────────────
               loading: () => const Center(child: CircularProgressIndicator()),
 
-              // ── Error ──────────────────────────────────────────────────
               error: (err, _) => Center(
                 child: Padding(
                   padding: const EdgeInsets.all(32),
@@ -277,7 +290,9 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        _apiErrorMessage(err),
+                        err is ApiException
+                            ? err.displayMessage
+                            : 'Something went wrong. Please try again.',
                         style: t.bodyLarge?.copyWith(color: AppColors.muted),
                         textAlign: TextAlign.center,
                       ),
@@ -292,21 +307,18 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
                 ),
               ),
 
-              // ── Data ───────────────────────────────────────────────────
               data: (allUsers) {
                 final items = _filterAndSort(allUsers);
-                final scoutCount = allUsers
-                    .where((u) => !u.role.isAdmin)
-                    .length;
-                final adminCount = allUsers.where((u) => u.role.isAdmin).length;
+                final scoutCount =
+                    allUsers.where((u) => !u.role.isAdmin).length;
+                final adminCount =
+                    allUsers.where((u) => u.role.isAdmin).length;
                 final isEmpty = items.isEmpty;
 
                 return RefreshIndicator(
                   color: AppColors.primary,
                   onRefresh: () async {
                     ref.invalidate(usersProvider);
-                    // Wait for the new fetch to complete before
-                    // the spinner dismisses.
                     await ref.read(usersProvider.future);
                   },
                   child: CustomScrollView(
@@ -520,7 +532,6 @@ class _UsersHeaderState extends State<_UsersHeader> {
           ),
         ),
         const SizedBox(width: 10),
-        // Refresh button
         SizedBox(
           width: 42,
           height: 42,
@@ -543,7 +554,6 @@ class _UsersHeaderState extends State<_UsersHeader> {
                 ),
         ),
         const SizedBox(width: 6),
-        // Add button
         DecoratedBox(
           decoration: BoxDecoration(
             color: AppColors.primary,
@@ -763,10 +773,10 @@ class _ExpandableMemberCard extends StatelessWidget {
     );
 
     final stripColor = isSuperAdmin
-        ? const Color(0xFFFFB300) // Gold for super admin.
+        ? const Color(0xFFFFB300)
         : isAdmin
-        ? AppColors.primary
-        : const Color(0xFFE1E6ED);
+            ? AppColors.primary
+            : const Color(0xFFE1E6ED);
 
     return ValueListenableBuilder<bool>(
       valueListenable: expanded,
@@ -797,9 +807,8 @@ class _ExpandableMemberCard extends StatelessWidget {
                           backgroundColor: AppColors.background,
                           child: Text(
                             initials,
-                            style: t.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w800,
-                            ),
+                            style: t.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w800),
                           ),
                         ),
                         if (isSuperAdmin)
@@ -867,7 +876,8 @@ class _ExpandableMemberCard extends StatelessWidget {
                   firstChild: const SizedBox.shrink(),
                   secondChild: isSuperAdmin
                       ? const _ProtectedDetailsBlock()
-                      : _MemberDetailsBlock(onEdit: onEdit, onDelete: onDelete),
+                      : _MemberDetailsBlock(
+                          onEdit: onEdit, onDelete: onDelete),
                 ),
               ],
             ),
@@ -878,7 +888,6 @@ class _ExpandableMemberCard extends StatelessWidget {
   }
 }
 
-/// Locked notice for the super admin — no action buttons.
 class _ProtectedDetailsBlock extends StatelessWidget {
   const _ProtectedDetailsBlock();
 
@@ -912,8 +921,6 @@ class _ProtectedDetailsBlock extends StatelessWidget {
   }
 }
 
-/// Edit + Delete row — same two-column layout as before, but Delete (red)
-/// replaces promote/demote.
 class _MemberDetailsBlock extends StatelessWidget {
   const _MemberDetailsBlock({required this.onEdit, required this.onDelete});
 
@@ -983,13 +990,13 @@ class _RoleChip extends StatelessWidget {
     final bg = isSuperAdmin
         ? const Color(0xFFFFF3D0)
         : isAdmin
-        ? AppColors.primary
-        : Colors.white;
+            ? AppColors.primary
+            : Colors.white;
     final fg = isSuperAdmin
         ? const Color(0xFF8B6914)
         : isAdmin
-        ? Colors.white
-        : AppColors.muted;
+            ? Colors.white
+            : AppColors.muted;
     final label = isSuperAdmin ? 'OWNER' : (isAdmin ? 'ADMIN' : 'SCOUT');
 
     return Container(
@@ -1000,8 +1007,8 @@ class _RoleChip extends StatelessWidget {
         border: isSuperAdmin
             ? Border.all(color: const Color(0xFFFFB300))
             : isAdmin
-            ? null
-            : Border.all(color: AppColors.outline),
+                ? null
+                : Border.all(color: AppColors.outline),
       ),
       child: Text(
         label,

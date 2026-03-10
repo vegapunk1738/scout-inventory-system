@@ -315,7 +315,7 @@ Future<void> showUserActionResultDialog(
     barrierLabel: 'User Action Result',
     barrierColor: Colors.black.withValues(alpha: 0.55),
     transitionDuration: const Duration(milliseconds: 220),
-    pageBuilder: (_, __, ___) {
+    pageBuilder: (_, _, _) {
       return SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -323,7 +323,7 @@ Future<void> showUserActionResultDialog(
         ),
       );
     },
-    transitionBuilder: (_, anim, __, w) {
+    transitionBuilder: (_, anim, _, w) {
       final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
       return FadeTransition(
         opacity: curved,

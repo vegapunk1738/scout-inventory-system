@@ -195,32 +195,27 @@ class _AppToastOverlayState extends State<AppToastOverlay>
               left: 14,
               right: 14,
               bottom: bottomInset,
-              // Reserve height for front card. Behind cards overflow
-              // upward via Transform, so clip must be off.
-              child: SizedBox(
-                height: 74,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  alignment: Alignment.bottomCenter,
-                  children: [
-                    for (
-                      int i =
-                          (_toasts.length > _maxVisible
-                              ? _maxVisible
-                              : _toasts.length) -
-                          1;
-                      i >= 0;
-                      i--
-                    )
-                      _AnimatedZCard(
-                        key: ValueKey(_toasts[i].entry.id),
-                        live: _toasts[i],
-                        depth: i,
-                        isFront: i == 0,
-                        onDismiss: () => _dismiss(_toasts[i].entry),
-                      ),
-                  ],
-                ),
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.bottomCenter,
+                children: [
+                  for (
+                    int i =
+                        (_toasts.length > _maxVisible
+                            ? _maxVisible
+                            : _toasts.length) -
+                        1;
+                    i >= 0;
+                    i--
+                  )
+                    _AnimatedZCard(
+                      key: ValueKey(_toasts[i].entry.id),
+                      live: _toasts[i],
+                      depth: i,
+                      isFront: i == 0,
+                      onDismiss: () => _dismiss(_toasts[i].entry),
+                    ),
+                ],
               ),
             ),
         ],

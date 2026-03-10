@@ -3,8 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import 'package:scout_stock/domain/models/managed_user.dart'
-    show kSuperAdminScoutId;
+import 'package:scout_stock/domain/models/managed_user.dart' show kSuperAdminScoutId;
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
 import 'package:scout_stock/theme/app_theme.dart';
@@ -238,8 +237,8 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
     final subtitle = _isSuperAdmin
         ? 'This is the Super Admin account. It cannot be modified.'
         : _isEdit
-        ? 'Update the details for this team member.'
-        : 'Fill in the details to add a new team member.';
+            ? 'Update the details for this team member.'
+            : 'Fill in the details to add a new team member.';
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
@@ -283,10 +282,8 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(
-                          Icons.lock_rounded,
-                          color: Color(0xFF8B6914),
-                        ),
+                        const Icon(Icons.lock_rounded,
+                            color: Color(0xFF8B6914)),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
@@ -349,10 +346,8 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                   ),
                   textStyle: _fieldTextStyle(context),
                   hintStyle: _hintStyle(context),
-                  suffixIcon: const Icon(
-                    Icons.person_rounded,
-                    color: AppColors.muted,
-                  ),
+                  suffixIcon: const Icon(Icons.person_rounded,
+                      color: AppColors.muted),
                   onSubmitted: (_) => _idFocus.requestFocus(),
                 ),
 
@@ -370,9 +365,8 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                   textAlign: TextAlign.start,
                   textCapitalization: TextCapitalization.none,
                   keyboardType: TextInputType.number,
-                  textInputAction: _isEdit
-                      ? TextInputAction.done
-                      : TextInputAction.next,
+                  textInputAction:
+                      _isEdit ? TextInputAction.done : TextInputAction.next,
                   allowPattern: r'[0-9]',
                   uppercase: false,
                   maxLength: 10,
@@ -383,10 +377,8 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                   ),
                   textStyle: _fieldTextStyle(context),
                   hintStyle: _hintStyle(context),
-                  suffixIcon: const Icon(
-                    Icons.badge_rounded,
-                    color: AppColors.muted,
-                  ),
+                  suffixIcon: const Icon(Icons.badge_rounded,
+                      color: AppColors.muted),
                   onSubmitted: (_) {
                     if (_isEdit) _submit();
                   },
@@ -442,7 +434,8 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                     const SizedBox(height: 8),
                     Text(
                       'Default password is Temp-{ID}!. You can change it before creating.',
-                      style: t.bodyMedium?.copyWith(color: AppColors.muted),
+                      style:
+                          t.bodyMedium?.copyWith(color: AppColors.muted),
                     ),
                   ] else ...[
                     Text('New Password', style: t.titleMedium),
@@ -467,8 +460,8 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                       textStyle: _fieldTextStyle(context),
                       hintStyle: _hintStyle(context),
                       suffixIcon: IconButton(
-                        onPressed: () =>
-                            setState(() => _newPwObscure = !_newPwObscure),
+                        onPressed: () => setState(
+                            () => _newPwObscure = !_newPwObscure),
                         icon: Icon(
                           _newPwObscure
                               ? Icons.visibility_rounded
@@ -502,9 +495,8 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                       textStyle: _fieldTextStyle(context),
                       hintStyle: _hintStyle(context),
                       suffixIcon: IconButton(
-                        onPressed: () => setState(
-                          () => _confirmPwObscure = !_confirmPwObscure,
-                        ),
+                        onPressed: () => setState(() =>
+                            _confirmPwObscure = !_confirmPwObscure),
                         icon: Icon(
                           _confirmPwObscure
                               ? Icons.visibility_rounded
@@ -518,7 +510,8 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                     const SizedBox(height: 8),
                     Text(
                       'Leave both password fields empty to keep the current password.',
-                      style: t.bodyMedium?.copyWith(color: AppColors.muted),
+                      style:
+                          t.bodyMedium?.copyWith(color: AppColors.muted),
                     ),
                   ],
                 ],
@@ -558,7 +551,28 @@ class _RoleSegmented extends StatelessWidget {
 
     Widget option(_UserRole role) {
       final selected = value == role;
-      final bg = selected ? Colors.white : Colors.transparent;
+
+      // Use transparent *white* (not Colors.transparent which is
+      // transparent *black*) so the lerp stays white → invisible white
+      // instead of white → grey → invisible.
+      final bg = selected
+          ? Colors.white
+          : Colors.white.withValues(alpha: 0);
+
+      // Keep the same number of shadows so AnimatedContainer can
+      // smoothly lerp instead of jumping between list lengths.
+      final shadow = tokens.cardShadow
+          .map(
+            (s) => selected
+                ? s
+                : BoxShadow(
+                    color: s.color.withValues(alpha: 0),
+                    blurRadius: 0,
+                    spreadRadius: 0,
+                    offset: s.offset,
+                  ),
+          )
+          .toList();
 
       return Expanded(
         child: InkWell(
@@ -573,7 +587,7 @@ class _RoleSegmented extends StatelessWidget {
             decoration: BoxDecoration(
               color: bg,
               borderRadius: BorderRadius.circular(radius - 6),
-              boxShadow: selected ? tokens.cardShadow : const [],
+              boxShadow: shadow,
             ),
             padding: const EdgeInsets.symmetric(horizontal: 14),
             child: Row(
