@@ -89,8 +89,18 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
   // ── Actions ────────────────────────────────────────────────────────────
 
   Future<void> _onAdd() async {
+    // Fetch the next available scout_id before opening the form.
+    String nextId = '';
+    try {
+      nextId = await ref.read(usersProvider.notifier).fetchNextScoutId();
+    } catch (_) {
+      // If the fetch fails, the form will still work — ID field is editable.
+    }
+    if (!mounted) return;
+
     final res = await context.push<Map<String, dynamic>>(
       AppRoutes.adminUserCreate,
+      extra: CreateUserArgs(nextScoutId: nextId),
     );
     if (!mounted || res == null) return;
 
@@ -100,9 +110,7 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
     final password = (res['password'] ?? '').toString();
 
     try {
-      await ref
-          .read(usersProvider.notifier)
-          .createUser(
+      final created = await ref.read(usersProvider.notifier).createUser(
             scoutId: scoutId,
             fullName: fullName,
             password: password,
@@ -110,11 +118,13 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
           );
       if (!mounted) return;
 
+      // Use the actual scoutId from the response — the backend may have
+      // auto-incremented it if a concurrent conflict occurred.
       final roleLabel = role == 'admin' ? 'Admin' : 'Scout';
       AppToast.of(context).show(
         AppToastData.success(
           title: '$fullName joined the team',
-          subtitle: '$roleLabel  ·  ID #$scoutId',
+          subtitle: '$roleLabel  ·  ID #${created.scoutId}',
         ),
       );
     } catch (e) {

@@ -26,6 +26,15 @@ class UsersNotifier extends AsyncNotifier<List<ManagedUser>> {
     return users;
   }
 
+  // ── Next available scout_id ────────────────────────────────────────────
+
+  /// Fetches the next available scout_id from the backend.
+  /// Returns a zero-padded string like "0003".
+  Future<String> fetchNextScoutId() async {
+    final res = await _api.get('/users/next-scout-id');
+    return res['scout_id'] as String;
+  }
+
   // ── Create ─────────────────────────────────────────────────────────────
 
   Future<ManagedUser> createUser({

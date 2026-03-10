@@ -172,7 +172,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         parentNavigatorKey: _rootNavKey,
         path: AppRoutes.adminUserCreate,
         name: 'adminUserCreate',
-        builder: (context, state) => const UserUpsertPage(),
+        builder: (context, state) {
+          final extra = state.extra;
+          final createArgs = extra is CreateUserArgs ? extra : null;
+          return UserUpsertPage(createArgs: createArgs);
+        },
       ),
       GoRoute(
         parentNavigatorKey: _rootNavKey,

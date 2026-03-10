@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Env } from "../types";
 import { users } from "../db/schema";
 import { hashPassword } from "../lib/crypto";
@@ -15,15 +15,15 @@ const CreateUserBody = z.object({
     .min(1, "Scout ID is required")
     .max(10)
     .regex(/^\d+$/, "Scout ID must contain only digits"),
-  full_name: z.string().min(2).max(100).trim(),
-  password: z.string().min(6).max(128),
+  full_name: z.string().min(2, "Name must be at least 2 characters").max(100).trim(),
+  password: z.string().min(6, "Password must be at least 6 characters").max(128),
   role: z.enum(["admin", "scout"]).default("scout"),
 });
 
 const UpdateUserBody = z
   .object({
-    full_name: z.string().min(2).max(100).trim().optional(),
-    password: z.string().min(6).max(128).optional(),
+    full_name: z.string().min(2, "Name must be at least 2 characters").max(100).trim().optional(),
+    password: z.string().min(6, "Password must be at least 6 characters").max(128).optional(),
     role: z.enum(["admin", "scout"]).optional(),
   })
   .refine((d) => Object.keys(d).length > 0, {
@@ -40,7 +40,25 @@ function sanitize<T extends { password_hash: string }>(
 }
 
 function isSuperAdmin(user: { id: string; scout_id: string }): boolean {
-  return user.id === SEED_USERS[0].id || user.scout_id === SEED_USERS[0].scout_id;
+  return (
+    user.id === SEED_USERS[0].id ||
+    user.scout_id === SEED_USERS[0].scout_id
+  );
+}
+
+/**
+ * Finds the next available scout_id by looking at the max numeric value
+ * currently in the table and incrementing by 1. Pads to 4 digits minimum.
+ */
+async function findNextScoutId(db: Env["Variables"]["db"]): Promise<string> {
+  const result = await db
+    .select({ maxId: sql<string>`MAX(CAST(scout_id AS INTEGER))` })
+    .from(users)
+    .limit(1);
+
+  const maxNum = parseInt(result[0]?.maxId ?? "0", 10) || 0;
+  const next = maxNum + 1;
+  return next.toString().padStart(4, "0");
 }
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
@@ -48,6 +66,13 @@ function isSuperAdmin(user: { id: string; scout_id: string }): boolean {
 const userRoutes = new Hono<Env>();
 
 userRoutes.use("/*", auth(), requireRole("admin"));
+
+// GET /users/next-scout-id — returns the next available scout_id
+userRoutes.get("/next-scout-id", async (c) => {
+  const db = c.get("db");
+  const scoutId = await findNextScoutId(db);
+  return c.json({ scout_id: scoutId });
+});
 
 // GET /users
 userRoutes.get("/", async (c) => {
@@ -79,22 +104,12 @@ userRoutes.get("/:identifier", async (c) => {
   return c.json({ data: sanitize(row) });
 });
 
-// POST /users
+// POST /users — creates a user; auto-increments scout_id on conflict
 userRoutes.post("/", async (c) => {
   const body = CreateUserBody.parse(await c.req.json());
   const db = c.get("db");
 
-  const byScoutId = (
-    await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.scout_id, body.scout_id))
-      .limit(1)
-  )[0];
-  if (byScoutId) {
-    throw new ConflictError(`Scout ID "${body.scout_id}" is already taken`);
-  }
-
+  // Check name uniqueness (always a hard error).
   const byName = (
     await db
       .select({ id: users.id })
@@ -106,12 +121,35 @@ userRoutes.post("/", async (c) => {
     throw new ConflictError(`Name "${body.full_name}" is already taken`);
   }
 
+  // Try the requested scout_id first, then auto-increment on conflict.
+  let scoutId = body.scout_id;
+  const maxAttempts = 10;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const exists = (
+      await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.scout_id, scoutId))
+        .limit(1)
+    )[0];
+
+    if (!exists) break; // scout_id is available
+
+    if (attempt === maxAttempts - 1) {
+      throw new ConflictError("Could not assign a unique Scout ID. Please try again.");
+    }
+
+    // Auto-increment: find next available
+    scoutId = await findNextScoutId(db);
+  }
+
   const row = (
     await db
       .insert(users)
       .values({
         id: crypto.randomUUID(),
-        scout_id: body.scout_id,
+        scout_id: scoutId,
         full_name: body.full_name,
         password_hash: await hashPassword(body.password),
         role: body.role,
@@ -139,7 +177,6 @@ userRoutes.patch("/:identifier", async (c) => {
   )[0];
   if (!existing) throw new NotFoundError("User");
 
-  // Protect Super Admin
   if (isSuperAdmin(existing)) {
     throw new ForbiddenError("Super Admin cannot be modified");
   }
@@ -163,7 +200,11 @@ userRoutes.patch("/:identifier", async (c) => {
   if (body.password) updates.password_hash = await hashPassword(body.password);
 
   const updated = (
-    await db.update(users).set(updates).where(eq(users.id, existing.id)).returning()
+    await db
+      .update(users)
+      .set(updates)
+      .where(eq(users.id, existing.id))
+      .returning()
   )[0];
 
   return c.json({ data: sanitize(updated) });
@@ -179,7 +220,6 @@ userRoutes.delete("/:identifier", async (c) => {
     ? eq(users.scout_id, identifier)
     : eq(users.id, identifier);
 
-  // Look up first to check Super Admin protection
   const existing = (
     await db.select().from(users).where(condition).limit(1)
   )[0];
