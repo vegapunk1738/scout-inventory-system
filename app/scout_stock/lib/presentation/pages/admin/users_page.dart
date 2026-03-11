@@ -176,7 +176,7 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
       }
       if (pwChanged) changes.add('Password reset');
 
-      final displayName = nameChanged ? newName! : user.fullName;
+      final displayName = nameChanged ? newName : user.fullName;
 
       // If the admin changed their own role or name, refresh the JWT.
       final currentUser = ref.read(currentUserProvider);

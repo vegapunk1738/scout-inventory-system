@@ -5,6 +5,8 @@ import { Env } from "./types";
 import { errorHandler } from "./middleware/error-handler";
 import { authRoutes } from "./routes/auth";
 import { userRoutes } from "./routes/users";
+import { bucketRoutes } from "./routes/buckets";
+import { transactionRoutes } from "./routes/transactions";
 import { ensureSeedUsers } from "./lib/seed";
 
 const app = new Hono<Env>();
@@ -29,6 +31,8 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 
 app.route("/auth", authRoutes);
 app.route("/users", userRoutes);
+app.route("/buckets", bucketRoutes);
+app.route("/transactions", transactionRoutes);
 
 // ─── Error handling ─────────────────────────────────────────────────────────
 

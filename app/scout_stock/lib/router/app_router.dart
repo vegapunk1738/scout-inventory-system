@@ -9,6 +9,7 @@ import 'package:scout_stock/presentation/pages/admin/bucket_management_admin_pag
 import 'package:scout_stock/presentation/pages/admin/bucket_upsert_page.dart';
 import 'package:scout_stock/presentation/pages/admin/user_upsert_page.dart';
 import 'package:scout_stock/presentation/pages/admin/users_page.dart';
+import 'package:scout_stock/presentation/pages/bucket_loader_page.dart';
 import 'package:scout_stock/presentation/pages/bucket_mixed_items_page.dart';
 import 'package:scout_stock/presentation/pages/bucket_single_item_page.dart';
 import 'package:scout_stock/presentation/pages/cart_page.dart';
@@ -157,6 +158,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         name: 'manualEntry',
         builder: (context, state) => const ManualEntryPage(),
       ),
+
+      // ─── Bucket route — fetches by barcode, renders single/mixed ──────
       GoRoute(
         parentNavigatorKey: _rootNavKey,
         path: '/bucket/:barcode',
@@ -164,7 +167,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           final raw = state.pathParameters['barcode'] ?? '';
           final barcode = Uri.decodeComponent(raw);
-          return _BucketRouteDecider(barcode: barcode);
+          return BucketLoaderPage(barcode: barcode);
         },
       ),
 
@@ -301,72 +304,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
     },
   );
 });
-
-class _BucketRouteDecider extends StatelessWidget {
-  const _BucketRouteDecider({required this.barcode});
-
-  final String barcode;
-
-  @override
-  Widget build(BuildContext context) {
-    if (barcode == 'ABC-ABC-123') {
-      return BucketItemPage(barcode: barcode);
-    }
-
-    if (barcode == 'AAA-AAA-111') {
-      return BucketMixedItemsPage(
-        bucketId: barcode,
-        bucketName: 'Bucket 1',
-        items: const [
-          BucketCatalogItem(
-            id: 'ITM-HDS-0001',
-            name: 'Heavy Duty Stakes',
-            emoji: '📌',
-            available: 12,
-          ),
-          BucketCatalogItem(
-            id: 'ITM-NRP-0002',
-            name: 'Nylon Rope (10m)',
-            emoji: '🪢',
-            available: 5,
-          ),
-          BucketCatalogItem(
-            id: 'ITM-LED-0003',
-            name: 'LED Lantern',
-            emoji: '🏮',
-            available: 7,
-          ),
-          BucketCatalogItem(
-            id: 'ITM-FTC-0004',
-            name: 'First Aid Kit',
-            emoji: '🩹',
-            available: 2,
-          ),
-          BucketCatalogItem(
-            id: 'ITM-TPR-0005',
-            name: 'Tarp (2×3m)',
-            emoji: '⛺️',
-            available: 4,
-          ),
-        ],
-      );
-    }
-
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text('Bucket'),
-        backgroundColor: AppColors.background,
-      ),
-      body: Center(
-        child: Text(
-          'Unknown bucket barcode:\n$barcode',
-          textAlign: TextAlign.center,
-        ),
-      ),
-    );
-  }
-}
 
 class _AppLoadingScreen extends StatelessWidget {
   const _AppLoadingScreen();

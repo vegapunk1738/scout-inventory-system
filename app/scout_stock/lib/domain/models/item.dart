@@ -2,7 +2,7 @@ class Item {
   const Item({
     required this.id,
     required this.name,
-    required this.bucketId,
+    required this.bucketBarcode,
     required this.bucketName,
     required this.quantity,
     required this.maxQuantity,
@@ -13,7 +13,7 @@ class Item {
 
   final String name;
 
-  final String bucketId;
+  final String bucketBarcode;
 
   final String bucketName;
 
@@ -34,7 +34,7 @@ class Item {
     return Item(
       id: id ?? this.id,
       name: name ?? this.name,
-      bucketId: bucketId ?? this.bucketId,
+      bucketBarcode: bucketId ?? this.bucketBarcode,
       bucketName: bucketName ?? this.bucketName,
       quantity: quantity ?? this.quantity,
       maxQuantity: maxQuantity ?? this.maxQuantity,

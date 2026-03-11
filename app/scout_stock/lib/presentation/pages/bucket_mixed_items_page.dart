@@ -27,13 +27,13 @@ class BucketCatalogItem {
 class BucketMixedItemsPage extends ConsumerStatefulWidget {
   const BucketMixedItemsPage({
     super.key,
-    required this.bucketId,
+    required this.bucketBarcode,
     required this.bucketName,
     required this.items,
     this.cartTabIndex = 1,
   });
 
-  final String bucketId;
+  final String bucketBarcode;
   final String bucketName;
   final List<BucketCatalogItem> items;
 
@@ -58,7 +58,7 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
   @override
   void didUpdateWidget(covariant BucketMixedItemsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.bucketId != widget.bucketId) {
+    if (oldWidget.bucketBarcode != widget.bucketBarcode) {
       _baseQty.clear();
       _captureBaseline();
     }
@@ -120,7 +120,7 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
           id: cat.id,
           name: cat.name,
           emoji: cat.emoji,
-          bucketId: widget.bucketId,
+          bucketBarcode: widget.bucketBarcode,
           bucketName: widget.bucketName,
           quantity: next,
           maxQuantity: max,
@@ -158,7 +158,10 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
     // Narrow rebuilds to items only (good for older phones).
     final cartItems = ref.watch(cartProvider.select((c) => c.items));
 
-    final totalCartCount = cartItems.fold<int>(0, (sum, it) => sum + it.quantity);
+    final totalCartCount = cartItems.fold<int>(
+      0,
+      (sum, it) => sum + it.quantity,
+    );
 
     final addedCount = _addedFromThisPage(cartItems);
     final showCta = addedCount > 0;
@@ -167,12 +170,12 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
     final filtered = q.isEmpty
         ? widget.items
         : widget.items
-            .where(
-              (it) =>
-                  it.name.toLowerCase().contains(q) ||
-                  it.id.toLowerCase().contains(q),
-            )
-            .toList(growable: false);
+              .where(
+                (it) =>
+                    it.name.toLowerCase().contains(q) ||
+                    it.id.toLowerCase().contains(q),
+              )
+              .toList(growable: false);
 
     final isEmpty = filtered.isEmpty;
 
@@ -203,7 +206,7 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
                       child: Padding(
                         padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
                         child: BucketMixedHeader(
-                          bucketId: widget.bucketId,
+                          bucketBarcode: widget.bucketBarcode,
                           bucketName: widget.bucketName,
                           itemTypesCount: widget.items.length,
                           cartCount: totalCartCount,
@@ -233,7 +236,9 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
                         child: _EmptyBucketState(
                           query: _searchCtrl.text.trim(),
                           titleStyle: t.titleLarge,
-                          bodyStyle: t.bodyLarge?.copyWith(color: AppColors.muted),
+                          bodyStyle: t.bodyLarge?.copyWith(
+                            color: AppColors.muted,
+                          ),
                         ),
                       )
                     else
@@ -322,7 +327,7 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
 class BucketMixedHeader extends StatelessWidget {
   const BucketMixedHeader({
     super.key,
-    required this.bucketId,
+    required this.bucketBarcode,
     required this.bucketName,
     required this.itemTypesCount,
     required this.cartCount,
@@ -330,7 +335,7 @@ class BucketMixedHeader extends StatelessWidget {
     required this.onCart,
   });
 
-  final String bucketId;
+  final String bucketBarcode;
   final String bucketName;
   final int itemTypesCount;
   final int cartCount;
@@ -370,7 +375,7 @@ class BucketMixedHeader extends StatelessWidget {
         Row(
           children: [
             Text(
-              bucketId,
+              bucketBarcode,
               style: t.labelMedium?.copyWith(
                 color: AppColors.primary,
                 letterSpacing: 1.4,

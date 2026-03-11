@@ -41,6 +41,7 @@ dependencies:
   pdf: any
   printing: any
   shared_preferences: ^2.5.4
+  uuid: ^4.5.3
 
 dev_dependencies:
   flutter_test:

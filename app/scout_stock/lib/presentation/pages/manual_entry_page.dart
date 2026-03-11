@@ -5,6 +5,9 @@ import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
 import '../../theme/app_theme.dart';
 import '../widgets/attention_text_field_widget.dart';
 
+/// SSB-XXX-NNN where XXX = 3 uppercase letters, NNN = 3 digits.
+final RegExp _ssbPattern = RegExp(r'^SSB-[A-Z]{3}-\d{3}$');
+
 class ManualEntryPage extends StatefulWidget {
   const ManualEntryPage({super.key});
 
@@ -34,14 +37,6 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
     super.dispose();
   }
 
-  bool _mockBucketExists(String code) {
-    final okFormat = RegExp(r'^[A-Z0-9]+(?:-[A-Z0-9]+)*$').hasMatch(code);
-
-    final notFound = code.endsWith('-0000');
-
-    return okFormat && code.length >= 4 && !notFound;
-  }
-
   Future<void> _openBucket() async {
     final code = _controller.text.trim().toUpperCase();
 
@@ -51,7 +46,7 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
       return;
     }
 
-    if (!_mockBucketExists(code)) {
+    if (!_ssbPattern.hasMatch(code)) {
       _focusNode.requestFocus();
       await _fieldKey.currentState?.triggerInvalid();
       return;
@@ -59,6 +54,8 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
 
     FocusScope.of(context).unfocus();
 
+    // Pop the validated code back to the scan page.
+    // The scan page handles the API fetch + navigation.
     Navigator.of(context).pop<String>(code);
   }
 
@@ -89,13 +86,14 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
                 Text('Manual Entry', style: textTheme.displaySmall),
                 const SizedBox(height: 12),
                 Text(
-                  'Enter the ID directly if the barcode is\ndamaged or unreadable.',
+                  'Enter the bucket code directly if the barcode is\ndamaged or unreadable.',
                   style: textTheme.bodyLarge?.copyWith(color: AppColors.muted),
                 ),
                 const SizedBox(height: 34),
                 Text(
                   'ENTER BUCKET CODE',
-                  style: textTheme.labelMedium?.copyWith(color: AppColors.ink),
+                  style:
+                      textTheme.labelMedium?.copyWith(color: AppColors.ink),
                 ),
                 const SizedBox(height: 12),
 
@@ -104,14 +102,15 @@ class _ManualEntryPageState extends State<ManualEntryPage> {
                   controller: _controller,
                   focusNode: _focusNode,
                   autofocus: true,
-                  hintText: 'e.g. XXXX-XXXX-1111',
+                  hintText: 'e.g. SSB-TNT-912',
                   onSubmitted: (_) => _openBucket(),
                 ),
 
                 const SizedBox(height: 16),
                 Text(
-                  'Tip: Use the keypad below to enter numbers.',
-                  style: textTheme.bodyMedium?.copyWith(color: AppColors.muted),
+                  'Format: SSB-XXX-000 (3 letters, 3 digits)',
+                  style:
+                      textTheme.bodyMedium?.copyWith(color: AppColors.muted),
                 ),
               ],
             ),

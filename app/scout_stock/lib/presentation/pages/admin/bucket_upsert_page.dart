@@ -17,10 +17,14 @@ class BucketUpsertArgs {
   const BucketUpsertArgs({
     required this.barcode,
     required this.name,
+    this.bucketId,
     this.contents = const [],
     @Deprecated('Bucket emojis are no longer used in the UI.')
     this.emoji = '🪣',
   });
+
+  /// Backend UUID — null in create mode.
+  final String? bucketId;
 
   /// Bucket barcode / ID (Code128 content), e.g. "SSB-COO-104".
   final String barcode;
@@ -35,14 +39,21 @@ class BucketUpsertArgs {
 
 class BucketContentSeed {
   const BucketContentSeed({
+    this.id,
     required this.name,
     required this.emoji,
     required this.quantity,
+    this.borrowed = 0,
   });
 
+  /// Backend item_type UUID — null for brand-new items.
+  final String? id;
   final String name;
   final String emoji;
   final int quantity;
+
+  /// How many are currently borrowed. Used to enforce min quantity.
+  final int borrowed;
 }
 
 class BucketUpsertPage extends StatefulWidget {
@@ -86,9 +97,11 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
       for (final c in args.contents) {
         _items.add(
           _ContentDraft(
+            existingId: c.id,
             emoji: c.emoji.isNotEmpty ? c.emoji : '📦',
             name: c.name,
             quantity: c.quantity.clamp(1, 999),
+            borrowed: c.borrowed,
           ),
         );
       }
@@ -125,9 +138,11 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
     return clean.length >= 3 ? clean.substring(0, 3) : clean.padRight(3, 'X');
   }
 
+  String get _abbreviation => _abbrev3(_nameCtrl.text.trim());
+
   String get _barcode {
     if (_isEdit) return _fixedBarcode ?? 'SSB-???-???';
-    final ab = _abbrev3(_nameCtrl.text.trim());
+    final ab = _abbreviation;
     return 'SSB-$ab-$_digits3';
   }
 
@@ -158,6 +173,21 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
   }
 
   void _removeItem(int index) {
+    final item = _items[index];
+
+    // Can't remove items that have active borrowings.
+    if (item.borrowed > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Cannot remove "${item.nameCtrl.text}" — '
+            '${item.borrowed} currently borrowed',
+          ),
+        ),
+      );
+      return;
+    }
+
     setState(() {
       final it = _items.removeAt(index);
       it.dispose();
@@ -177,7 +207,8 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
   void _onDelta(_ContentDraft item, int delta) {
     if (delta == 0) return;
     setState(() {
-      final next = (item.quantity + delta).clamp(1, 999);
+      final minQty = math.max(1, item.borrowed);
+      final next = (item.quantity + delta).clamp(minQty, 999);
       item.quantity = next;
     });
   }
@@ -220,15 +251,29 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
       return;
     }
 
+    // Validate abbreviation for create mode.
+    if (!_isEdit && !RegExp(r'^[A-Z]{3}$').hasMatch(_abbreviation)) {
+      _nameFocus.requestFocus();
+      await _nameKey.currentState?.triggerInvalid();
+      return;
+    }
+
     setState(() => _saving = true);
     FocusScope.of(context).unfocus();
 
+    // ─── Pop form data back to the management page ──────────────────
+    // The management page handles the API call + toasts.
+    // This mirrors user_upsert_page._submit() exactly.
     context.pop<Map<String, dynamic>>({
-      'barcode': _barcode,
       'name': name,
+      'abbreviation': _abbreviation,
+      'barcode': _barcode,
+      if (_isEdit && widget.editArgs?.bucketId != null)
+        'bucketId': widget.editArgs!.bucketId,
       'contents': _items
           .map(
             (x) => {
+              if (x.existingId != null) 'id': x.existingId!,
               'name': x.nameCtrl.text.trim(),
               'emoji': x.emoji,
               'quantity': x.quantity,
@@ -255,7 +300,7 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
     final contentsCount = _items.length;
 
     // Extra breathing room at the end of the scroll so the sticky button
-    // doesn’t feel like it “cuts off” the end of the list.
+    // doesn't feel like it "cuts off" the end of the list.
     final bottomScrollPad = compact ? 170.0 : 190.0;
 
     return Scaffold(
@@ -427,7 +472,7 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
                     ),
                   ),
 
-                // Extra spacer so the end never feels “cut off” while scrolling.
+                // Extra spacer so the end never feels "cut off" while scrolling.
                 const SizedBox(height: 24),
               ],
             ),
@@ -449,22 +494,30 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
 
 class _ContentDraft {
   _ContentDraft({
+    this.existingId,
     required this.emoji,
     required String name,
     required this.quantity,
+    this.borrowed = 0,
   }) : nameCtrl = TextEditingController(text: name);
 
   final GlobalKey cardKey = GlobalKey();
 
-  // NEW: so we can trigger the same “attention invalid” UX as bucket name.
+  // NEW: so we can trigger the same "attention invalid" UX as bucket name.
   final GlobalKey<AttentionTextFieldState> nameKey =
       GlobalKey<AttentionTextFieldState>();
+
+  /// Backend item_type UUID — null for brand-new items.
+  final String? existingId;
 
   String emoji;
   final TextEditingController nameCtrl;
   final FocusNode focusNode = FocusNode();
 
   int quantity;
+
+  /// How many are currently borrowed. Immutable from the form's POV.
+  final int borrowed;
 
   void dispose() {
     nameCtrl.dispose();
@@ -578,6 +631,8 @@ class _ContentItemCard extends StatelessWidget {
           ]
         : const <BoxShadow>[];
 
+    final hasBorrowed = item.borrowed > 0;
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -625,12 +680,53 @@ class _ContentItemCard extends StatelessWidget {
               _TrashSquareButton(
                 size: tile, // make the X same height as emoji + field
                 onTap: onRemove,
+                disabled: hasBorrowed,
               ),
             ],
           ),
+
+          // Borrowed indicator
+          if (hasBorrowed) ...[
+            SizedBox(height: compact ? 8 : 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.warningBg,
+                borderRadius: BorderRadius.circular(tokens.radiusLg),
+                border: Border.all(color: const Color(0xFFFBD38D)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.people_outline_rounded,
+                    size: 16,
+                    color: Color(0xFF8A5B00),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${item.borrowed} currently borrowed',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF8A5B00),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    'min qty: ${item.borrowed}',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF8A5B00),
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           SizedBox(height: compact ? 10 : 12),
           _QtyStepperEdit(
             value: item.quantity,
+            minValue: math.max(1, item.borrowed),
             compact: compact,
             onDelta: onDelta,
           ),
@@ -641,7 +737,7 @@ class _ContentItemCard extends StatelessWidget {
 }
 
 /// Uses the SAME AttentionTextField as the bucket name.
-/// Styled to be “thick” and uniform with the emoji tile + X button.
+/// Styled to be "thick" and uniform with the emoji tile + X button.
 class _ItemNameAttentionField extends StatelessWidget {
   const _ItemNameAttentionField({
     super.key,
@@ -680,7 +776,7 @@ class _ItemNameAttentionField extends StatelessWidget {
       allowPattern: r'[A-Za-z0-9() ]',
       uppercase: false,
       maxLength: 48,
-      // Padding tuned to look “thick” like the bucket name, but slightly smaller.
+      // Padding tuned to look "thick" like the bucket name, but slightly smaller.
       contentPadding: EdgeInsets.symmetric(
         horizontal: 14,
         vertical: compact ? 12 : 14,
@@ -696,11 +792,13 @@ class _QtyStepperEdit extends StatelessWidget {
     required this.value,
     required this.compact,
     required this.onDelta,
+    this.minValue = 1,
   });
 
   final int value;
   final bool compact;
   final ValueChanged<int> onDelta;
+  final int minValue;
 
   @override
   Widget build(BuildContext context) {
@@ -709,7 +807,7 @@ class _QtyStepperEdit extends StatelessWidget {
 
     const max = 999;
 
-    final canMinus = value > 1;
+    final canMinus = value > minValue;
     final canPlus = value < max;
 
     final height = compact ? 50.0 : 56.0;
@@ -793,32 +891,40 @@ class _QtyStepperEdit extends StatelessWidget {
 }
 
 class _TrashSquareButton extends StatelessWidget {
-  const _TrashSquareButton({required this.size, required this.onTap});
+  const _TrashSquareButton({
+    required this.size,
+    required this.onTap,
+    this.disabled = false,
+  });
 
   final double size;
   final VoidCallback onTap;
+  final bool disabled;
 
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final iconSize = size <= 44 ? 18.0 : 20.0;
 
-    return InkResponse(
-      onTap: onTap,
-      radius: 26,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          color: AppColors.background,
-          borderRadius: BorderRadius.circular(tokens.radiusLg),
-          border: Border.all(color: AppColors.outline),
-        ),
-        alignment: Alignment.center,
-        child: Icon(
-          Icons.close_rounded,
-          size: iconSize,
-          color: AppColors.muted,
+    return Opacity(
+      opacity: disabled ? 0.35 : 1.0,
+      child: InkResponse(
+        onTap: disabled ? null : onTap,
+        radius: 26,
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: AppColors.background,
+            borderRadius: BorderRadius.circular(tokens.radiusLg),
+            border: Border.all(color: AppColors.outline),
+          ),
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.close_rounded,
+            size: iconSize,
+            color: AppColors.muted,
+          ),
         ),
       ),
     );

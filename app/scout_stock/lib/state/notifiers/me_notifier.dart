@@ -1,5 +1,7 @@
-import 'dart:math';
-import 'package:riverpod/riverpod.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:scout_stock/data/api/api_client.dart';
+import 'package:scout_stock/state/providers/api_provider.dart';
+import 'package:scout_stock/state/providers/transactions_provider.dart';
 import '../../domain/models/item.dart';
 
 enum MeFilterMode { all, borrowedOnly, returnedOnly }
@@ -13,6 +15,9 @@ class BorrowedRecord {
 
   final String id;
   final DateTime checkedOutAt;
+
+  /// [item.quantity] = how many the user wants to return (0..maxQuantity).
+  /// [item.maxQuantity] = total borrowed.
   final Item item;
 
   BorrowedRecord copyWith({DateTime? checkedOutAt, Item? item}) =>
@@ -28,11 +33,13 @@ class ReturnedRecord {
     required this.id,
     required this.returnedAt,
     required this.item,
+    this.status = 'normal',
   });
 
   final String id;
   final DateTime returnedAt;
   final Item item;
+  final String status; // 'normal', 'lost', 'damaged'
 }
 
 class MeState {
@@ -41,12 +48,16 @@ class MeState {
     required this.submitting,
     required this.borrowed,
     required this.returned,
+    this.loading = false,
+    this.error,
   });
 
   final MeFilterMode mode;
   final bool submitting;
+  final bool loading;
   final List<BorrowedRecord> borrowed;
   final List<ReturnedRecord> returned;
+  final String? error;
 
   int get totalToReturn =>
       borrowed.fold<int>(0, (sum, r) => sum + r.item.quantity);
@@ -56,92 +67,103 @@ class MeState {
   MeState copyWith({
     MeFilterMode? mode,
     bool? submitting,
+    bool? loading,
     List<BorrowedRecord>? borrowed,
     List<ReturnedRecord>? returned,
+    String? error,
   }) {
     return MeState(
       mode: mode ?? this.mode,
       submitting: submitting ?? this.submitting,
+      loading: loading ?? this.loading,
       borrowed: borrowed ?? this.borrowed,
       returned: returned ?? this.returned,
+      error: error,
     );
   }
 }
 
 class MeNotifier extends Notifier<MeState> {
+  ApiClient get _api {
+    final client = ref.read(apiClientProvider);
+    if (client == null) throw StateError('Not authenticated');
+    return client;
+  }
+
   @override
   MeState build() {
-    final now = DateTime.now();
+    // Trigger initial fetch
+    _fetchData();
 
-    DateTime d(int daysAgo) {
-      final base = DateTime(now.year, now.month, now.day);
-      return base.subtract(Duration(days: daysAgo));
-    }
-
-    final borrowed = <BorrowedRecord>[
-      BorrowedRecord(
-        id: 'br_1',
-        checkedOutAt: d(0),
-        item: Item(
-          id: Item.formatItemId(itemCode3: 'ULT', sequence: 1),
-          name: 'Ultralight Tent',
-          bucketId: Item.formatBucketId(bucketCode3: 'TSB', sequence: 1),
-          bucketName: 'Tents',
-          quantity: 0,
-          maxQuantity: 1,
-          emoji: '🏕️',
-        ),
-      ),
-      BorrowedRecord(
-        id: 'br_2',
-        checkedOutAt: d(0),
-        item: Item(
-          id: Item.formatItemId(itemCode3: 'PEG', sequence: 2),
-          name: 'Alloy Tent Pegs',
-          bucketId: Item.formatBucketId(bucketCode3: 'STB', sequence: 1),
-          bucketName: 'Stakes',
-          quantity: 0,
-          maxQuantity: 10,
-          emoji: '📌',
-        ),
-      ),
-      BorrowedRecord(
-        id: 'br_3',
-        checkedOutAt: d(1),
-        item: Item(
-          id: Item.formatItemId(itemCode3: 'SKL', sequence: 3),
-          name: 'Cast Iron Skillet',
-          bucketId: Item.formatBucketId(bucketCode3: 'CKB', sequence: 1),
-          bucketName: 'Cooking',
-          quantity: 0,
-          maxQuantity: 1,
-          emoji: '🍳',
-        ),
-      ),
-    ];
-
-    final returned = <ReturnedRecord>[
-      ReturnedRecord(
-        id: 'rr_1',
-        returnedAt: d(6),
-        item: Item(
-          id: Item.formatItemId(itemCode3: 'OSP', sequence: 10),
-          name: 'Osprey Pack 65L',
-          bucketId: Item.formatBucketId(bucketCode3: 'PKB', sequence: 1),
-          bucketName: 'Packs',
-          quantity: 1,
-          maxQuantity: 1,
-          emoji: '🎒',
-        ),
-      ),
-    ];
-
-    return MeState(
+    return const MeState(
       mode: MeFilterMode.all,
       submitting: false,
-      borrowed: borrowed,
-      returned: returned,
+      loading: true,
+      borrowed: [],
+      returned: [],
     );
+  }
+
+  Future<void> _fetchData() async {
+    try {
+      final res = await _api.get('/transactions/me');
+      final data = res['data'] as Map<String, dynamic>;
+
+      final borrowedRaw = (data['borrowed'] as List)
+          .cast<Map<String, dynamic>>();
+      final historyRaw = (data['return_history'] as List)
+          .cast<Map<String, dynamic>>();
+
+      final borrowed = borrowedRaw.map((b) {
+        final checkedOutStr = b['checked_out_at'] as String?;
+        final borrowedQty = b['borrowed'] as int;
+
+        return BorrowedRecord(
+          id: 'br_${b['item_type_id']}',
+          checkedOutAt: checkedOutStr != null
+              ? DateTime.parse(checkedOutStr)
+              : DateTime.now(),
+          item: Item(
+            id: b['item_type_id'] as String,
+            name: b['item_name'] as String,
+            bucketBarcode: b['bucket_id'] as String,
+            bucketName: b['bucket_name'] as String,
+            // quantity = how many user wants to return (starts at 0)
+            quantity: 0,
+            // maxQuantity = total borrowed by this user
+            maxQuantity: borrowedQty,
+            emoji: b['item_emoji'] as String,
+          ),
+        );
+      }).toList();
+
+      final returned = historyRaw.map((r) {
+        final quantity = r['quantity'] as int;
+
+        return ReturnedRecord(
+          id: 'rr_${r['transaction_id']}',
+          returnedAt: DateTime.parse(r['created_at'] as String),
+          status: r['status'] as String? ?? 'normal',
+          item: Item(
+            id: r['item_type_id'] as String,
+            name: r['item_name'] as String,
+            bucketBarcode: r['bucket_id'] as String,
+            bucketName: r['bucket_name'] as String,
+            quantity: quantity,
+            maxQuantity: quantity,
+            emoji: r['item_emoji'] as String,
+          ),
+        );
+      }).toList();
+
+      state = state.copyWith(
+        loading: false,
+        borrowed: borrowed,
+        returned: returned,
+      );
+    } catch (e) {
+      state = state.copyWith(loading: false, error: '$e');
+    }
   }
 
   void toggleMode(MeFilterMode tapped) {
@@ -171,57 +193,33 @@ class MeNotifier extends Notifier<MeState> {
 
     state = state.copyWith(submitting: true);
     try {
-      await Future.delayed(const Duration(milliseconds: 650));
-      final ok = Random().nextBool();
+      final itemsToReturn = state.borrowed
+          .where((r) => r.item.quantity > 0)
+          .map(
+            (r) => {
+              'bucket_id': r.item.bucketBarcode,
+              'item_type_id': r.item.id,
+              'quantity': r.item.quantity,
+            },
+          )
+          .toList();
 
-      if (!ok) {
-        return (ok: false, txnId: null, error: 'E-RTN-500');
-      }
+      final txNotifier = ref.read(transactionsProvider.notifier);
+      final txnId = await txNotifier.returnItems(itemsToReturn);
 
-      final now = DateTime.now();
+      // Refresh data from API
+      await _fetchData();
 
-      final newReturned = <ReturnedRecord>[];
-      final newBorrowed = <BorrowedRecord>[];
-
-      for (final br in state.borrowed) {
-        final selected = br.item.quantity;
-        final outQty = br.item.maxQuantity;
-
-        if (selected <= 0) {
-          newBorrowed.add(br);
-          continue;
-        }
-
-        newReturned.add(
-          ReturnedRecord(
-            id: 'rr_${now.microsecondsSinceEpoch}_${br.id}',
-            returnedAt: now,
-            item: br.item.copyWith(quantity: selected, maxQuantity: selected),
-          ),
-        );
-
-        final remaining = outQty - selected;
-        if (remaining > 0) {
-          newBorrowed.add(
-            br.copyWith(
-              item: br.item.copyWith(quantity: 0, maxQuantity: remaining),
-            ),
-          );
-        }
-      }
-
-      state = state.copyWith(
-        borrowed: newBorrowed,
-        returned: [...newReturned, ...state.returned],
-      );
-
-      return (
-        ok: true,
-        txnId: '#RTN-${Random().nextInt(90000) + 10000}',
-        error: null,
-      );
+      return (ok: true, txnId: txnId, error: null);
+    } catch (e) {
+      return (ok: false, txnId: null, error: '$e');
     } finally {
       state = state.copyWith(submitting: false);
     }
+  }
+
+  Future<void> refresh() async {
+    state = state.copyWith(loading: true);
+    await _fetchData();
   }
 }

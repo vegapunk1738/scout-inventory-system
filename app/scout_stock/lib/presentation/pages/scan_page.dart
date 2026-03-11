@@ -6,10 +6,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:scout_stock/presentation/widgets/app_toast.dart';
 import 'package:scout_stock/router/app_routes.dart';
 
 import '../../theme/app_theme.dart';
 import '../widgets/admin_shell.dart';
+
+/// SSB-XXX-NNN where XXX = 3 uppercase letters, NNN = 3 digits.
+final RegExp _ssbPattern = RegExp(r'^SSB-[A-Z]{3}-\d{3}$');
 
 class ScanPage extends StatefulWidget {
   const ScanPage({super.key});
@@ -44,8 +48,6 @@ class _ScanPageState extends State<ScanPage>
   String? _lastRaw;
   DateTime? _lastAt;
   String? _lastBucketLabel;
-
-  static final RegExp _digits = RegExp(r'(\d+)');
 
   bool _navigating = false;
 
@@ -242,6 +244,8 @@ class _ScanPageState extends State<ScanPage>
     }
   }
 
+  // ── Barcode handling ──────────────────────────────────────────────────
+
   void _handleBarcodeCapture(BarcodeCapture capture) {
     if (!mounted || !_isActive) return;
     if (capture.barcodes.isEmpty) return;
@@ -250,31 +254,40 @@ class _ScanPageState extends State<ScanPage>
     if (raw == null || raw.trim().isEmpty) return;
 
     final now = DateTime.now();
+
+    // Debounce: ignore duplicate scans within 2 seconds.
     if (_lastRaw == raw &&
         _lastAt != null &&
         now.difference(_lastAt!) < const Duration(seconds: 2)) {
       return;
     }
-
-    _lastRaw = raw;
     _lastAt = now;
 
-    final label = _bucketLabelFromRaw(raw);
-    if (label != _lastBucketLabel) {
-      setState(() => _lastBucketLabel = label);
+    // ── Validate SSB format ──────────────────────────────────────────
+    final code = raw.trim().toUpperCase();
+
+    if (!_ssbPattern.hasMatch(code)) {
+      // Invalid format — show error toast, do NOT update last scanned pill.
+      _lastRaw = raw; // still track to debounce repeated invalid scans
+      if (mounted) {
+        AppToast.of(context).show(AppToastData.error(
+          title: 'Invalid barcode',
+          subtitle: '"$raw" is not a valid bucket code (SSB-XXX-000)',
+        ));
+      }
+      return;
     }
 
-    // Always route by URL (fast on web, supports deep links/back/forward).
+    // Valid SSB barcode — update last scanned pill and navigate.
+    _lastRaw = code;
+    setState(() => _lastBucketLabel = code);
+
     if (!_navigating) {
-      _navigateToBucket(raw);
+      _navigateToBucket(code);
     }
   }
 
-  String _bucketLabelFromRaw(String raw) {
-    final m = _digits.firstMatch(raw);
-    if (m != null) return 'Bucket #${m.group(1)}';
-    return raw;
-  }
+  // ── Navigation ────────────────────────────────────────────────────────
 
   Future<void> _navigateToBucket(String raw) async {
     if (!mounted) return;
@@ -285,20 +298,25 @@ class _ScanPageState extends State<ScanPage>
 
     try {
       await context.push(AppRoutes.bucket(raw));
-    } finally {
-      if (!mounted) return;
-      _navigating = false;
+    } catch (_) {
+      // navigation error — ignore
+    }
 
-      if (_isActive) {
-        _resetFadeState();
-        _enqueueCamera(_activateScanner);
-      }
+    // Always reset the flag — even if widget was briefly unmounted.
+    _navigating = false;
+
+    if (!mounted) return;
+
+    if (_isActive) {
+      _resetFadeState();
+      _enqueueCamera(_activateScanner);
     }
   }
 
   Future<void> _openLastScanned() async {
     final raw = _lastRaw;
     if (raw == null || raw.isEmpty) return;
+    if (!_ssbPattern.hasMatch(raw)) return;
     await _navigateToBucket(raw);
   }
 
@@ -416,7 +434,7 @@ class _ScanPageState extends State<ScanPage>
                     ignoring: true,
                     child: AnimatedBuilder(
                       animation: _blackFade,
-                      builder: (_, _) {
+                      builder: (_, __) {
                         final a = _blackFade.value.clamp(0.0, 1.0);
                         if (a <= 0.001) return const SizedBox.shrink();
                         return ColoredBox(
@@ -563,14 +581,29 @@ class _ScanPageState extends State<ScanPage>
                               return;
                             }
 
-                            final now = DateTime.now();
+                            final upper = code.trim().toUpperCase();
+
+                            // Validate SSB format for manual entry too.
+                            if (!_ssbPattern.hasMatch(upper)) {
+                              AppToast.of(context).show(AppToastData.error(
+                                title: 'Invalid bucket code',
+                                subtitle:
+                                    '"$code" doesn\'t match SSB-XXX-000 format',
+                              ));
+                              if (_isActive) {
+                                _resetFadeState();
+                                _enqueueCamera(_activateScanner);
+                              }
+                              return;
+                            }
+
                             setState(() {
-                              _lastRaw = code;
-                              _lastAt = now;
-                              _lastBucketLabel = _bucketLabelFromRaw(code);
+                              _lastRaw = upper;
+                              _lastAt = DateTime.now();
+                              _lastBucketLabel = upper;
                             });
 
-                            await _navigateToBucket(code);
+                            await _navigateToBucket(upper);
                           },
                         ),
                       ),
@@ -585,7 +618,7 @@ class _ScanPageState extends State<ScanPage>
                     ignoring: true,
                     child: ValueListenableBuilder<MobileScannerState>(
                       valueListenable: _controller,
-                      builder: (_, state, _) {
+                      builder: (_, state, __) {
                         if (state.hasCameraPermission) return const SizedBox();
                         return Center(
                           child: Container(
@@ -623,6 +656,10 @@ class _ScanPageState extends State<ScanPage>
     );
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Private widgets — unchanged
+// ═══════════════════════════════════════════════════════════════════════════
 
 class _LastScannedPill extends StatelessWidget {
   const _LastScannedPill({

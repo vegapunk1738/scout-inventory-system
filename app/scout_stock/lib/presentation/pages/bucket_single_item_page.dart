@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'package:scout_stock/domain/models/item.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
@@ -10,24 +11,34 @@ import 'package:scout_stock/state/providers/cart_provider.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
 class BucketItemPage extends ConsumerStatefulWidget {
-  const BucketItemPage({super.key, required this.barcode});
+  const BucketItemPage({
+    super.key,
+    required this.barcode,
+    required this.bucketId,
+    required this.bucketName,
+    required this.itemId,
+    required this.itemName,
+    required this.itemEmoji,
+    required this.available,
+  });
+
   final String barcode;
+  final String bucketId;
+  final String bucketName;
+  final String itemId;
+  final String itemName;
+  final String itemEmoji;
+  final int available;
 
   @override
   ConsumerState<BucketItemPage> createState() => _BucketItemPageState();
 }
 
 class _BucketItemPageState extends ConsumerState<BucketItemPage> {
-  final int bucketNumber = 42;
-  final String bucketName = 'Patrol Box Alpha';
-
-  final String itemName = 'Propane Canisters';
-  final String sku = 'OUT-PRO-16OZ';
-
-  final int maxCount = 1000; 
-  int qty = 12;
-
+  int qty = 0;
   bool _loading = false;
+
+  int get maxCount => widget.available;
 
   void _applyDelta(int delta) {
     if (!mounted) return;
@@ -46,20 +57,14 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
     if (_loading || qty <= 0) return;
     setState(() => _loading = true);
 
-    final bucketId = Item.formatBucketId(
-      bucketCode3: 'PBX',
-      sequence: bucketNumber,
-    );
-    final itemId = Item.formatItemId(itemCode3: 'PRP', sequence: 1);
-
     final item = Item(
-      id: itemId,
-      name: itemName,
-      bucketId: bucketId,
-      bucketName: bucketName,
+      id: widget.itemId,
+      name: widget.itemName,
+      bucketBarcode: widget.barcode,
+      bucketName: widget.bucketName,
       quantity: qty,
       maxQuantity: maxCount,
-      emoji: '⛽',
+      emoji: widget.itemEmoji,
     );
 
     ref.read(cartProvider.notifier).addItem(item);
@@ -76,6 +81,7 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final t = Theme.of(context).textTheme;
+    final emojiBase = GoogleFonts.notoColorEmoji(height: 1);
 
     final canDec = qty > 0;
     final canInc = qty < maxCount;
@@ -95,7 +101,7 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
                   child: Column(
                     children: [
                       Text(
-                        'BUCKET #$bucketNumber',
+                        widget.barcode,
                         style: t.labelMedium?.copyWith(
                           color: AppColors.primary,
                           letterSpacing: 1.4,
@@ -103,7 +109,7 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        bucketName,
+                        widget.bucketName,
                         textAlign: TextAlign.center,
                         style: t.headlineMedium,
                         maxLines: 1,
@@ -123,18 +129,9 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
                       boxShadow: tokens.cardShadow,
                     ),
                     child: Center(
-                      child: Container(
-                        width: 86,
-                        height: 86,
-                        decoration: BoxDecoration(
-                          color: AppColors.primary.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(26),
-                        ),
-                        child: Icon(
-                          Icons.propane_tank_outlined,
-                          size: 44,
-                          color: AppColors.primary.withValues(alpha: 0.65),
-                        ),
+                      child: Text(
+                        widget.itemEmoji,
+                        style: emojiBase.copyWith(fontSize: 64),
                       ),
                     ),
                   ),
@@ -142,7 +139,7 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
                 const SizedBox(height: 22),
                 Center(
                   child: Text(
-                    itemName,
+                    widget.itemName,
                     textAlign: TextAlign.center,
                     style: t.headlineMedium?.copyWith(fontSize: 34),
                   ),

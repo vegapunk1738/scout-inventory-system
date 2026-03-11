@@ -746,7 +746,7 @@ class _BorrowedCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '${item.bucketName} | ${item.bucketId}',
+                        '${item.bucketName} | ${item.bucketBarcode}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: textTheme.bodyMedium?.copyWith(
@@ -850,7 +850,7 @@ class _ReturnedCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '${item.bucketName} | ${item.bucketId}',
+                        '${item.bucketName} | ${item.bucketBarcode}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: textTheme.bodyMedium?.copyWith(

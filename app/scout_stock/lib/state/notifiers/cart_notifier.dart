@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:riverpod/riverpod.dart';
 import '../../domain/models/item.dart';
 
@@ -9,18 +11,29 @@ class RemovedCartEntry {
 }
 
 class CartState {
-  const CartState({required this.items, required this.undoStack});
+  const CartState({
+    required this.items,
+    required this.undoStack,
+    this.checkingOut = false,
+  });
 
   final List<Item> items;
   final List<RemovedCartEntry> undoStack;
+  final bool checkingOut;
 
   bool get canUndo => undoStack.isNotEmpty;
   int get undoCount => undoStack.length;
+  bool get isEmpty => items.isEmpty;
 
-  CartState copyWith({List<Item>? items, List<RemovedCartEntry>? undoStack}) {
+  CartState copyWith({
+    List<Item>? items,
+    List<RemovedCartEntry>? undoStack,
+    bool? checkingOut,
+  }) {
     return CartState(
       items: items ?? this.items,
       undoStack: undoStack ?? this.undoStack,
+      checkingOut: checkingOut ?? this.checkingOut,
     );
   }
 }
@@ -28,46 +41,7 @@ class CartState {
 class CartNotifier extends Notifier<CartState> {
   @override
   CartState build() {
-    final demoItems = <Item>[
-      Item(
-        id: Item.formatItemId(itemCode3: 'CPT', sequence: 1),
-        name: 'Coleman 4-Person Tent',
-        bucketId: Item.formatBucketId(bucketCode3: 'TSB', sequence: 1),
-        bucketName: 'Tents Bucket',
-        quantity: 1,
-        maxQuantity: 4,
-        emoji: '🏕️',
-      ),
-      Item(
-        id: Item.formatItemId(itemCode3: 'HDS', sequence: 2),
-        name: 'Heavy Duty Stakes',
-        bucketId: Item.formatBucketId(bucketCode3: 'STB', sequence: 2),
-        bucketName: 'Stakes Bucket',
-        quantity: 4,
-        maxQuantity: 8,
-        emoji: '📌',
-      ),
-      Item(
-        id: Item.formatItemId(itemCode3: 'PSB', sequence: 3),
-        name: 'Propane Stove (2 Burner)',
-        bucketId: Item.formatBucketId(bucketCode3: 'SVB', sequence: 3),
-        bucketName: 'Stoves Bucket',
-        quantity: 1,
-        maxQuantity: 4,
-        emoji: '🔥',
-      ),
-      Item(
-        id: Item.formatItemId(itemCode3: 'MKS', sequence: 4),
-        name: 'Mess Kit (Full Set)',
-        bucketId: Item.formatBucketId(bucketCode3: 'MKB', sequence: 4),
-        bucketName: 'Mess Kits Bucket',
-        quantity: 4,
-        maxQuantity: 4,
-        emoji: '🍲',
-      ),
-    ];
-
-    return CartState(items: demoItems, undoStack: const []);
+    return const CartState(items: [], undoStack: []);
   }
 
   void addItem(Item item) {
@@ -182,5 +156,27 @@ class CartNotifier extends Notifier<CartState> {
     nextItems[idx] = it.copyWith(quantity: nextQty);
 
     state = state.copyWith(items: nextItems);
+  }
+
+  /// Checkout — will be wired to the backend transactions API later.
+  /// For now, clears the cart and returns a local txn ID.
+  Future<({bool ok, String? txnId, String? error})> checkout() async {
+    if (state.checkingOut) return (ok: false, txnId: null, error: 'busy');
+    if (state.items.isEmpty) return (ok: false, txnId: null, error: 'empty');
+
+    state = state.copyWith(checkingOut: true);
+
+    try {
+      // TODO: Replace with real API call via transactionsProvider
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      final txnId = '#TXN-${Random().nextInt(90000) + 10000}';
+      state = const CartState(items: [], undoStack: []);
+      return (ok: true, txnId: txnId, error: null);
+    } catch (e) {
+      return (ok: false, txnId: null, error: '$e');
+    } finally {
+      state = state.copyWith(checkingOut: false);
+    }
   }
 }

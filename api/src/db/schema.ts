@@ -22,7 +22,7 @@ export const item_types = sqliteTable("item_types", {
   name: text("name").notNull(),
   emoji: text("emoji").notNull(),
   bucket_id: text("bucket_id").notNull(),
-  max_quantity: integer("max_quantity").notNull().default(0),
+  quantity: integer("quantity").notNull().default(1),
 });
 
 export const transactions = sqliteTable("transactions", {
@@ -39,5 +39,8 @@ export const transaction_items = sqliteTable("transaction_items", {
   bucket_id: text("bucket_id").notNull(),
   item_type_id: text("item_type_id").notNull(),
   quantity: integer("quantity").notNull(),
-  direction: integer("direction").notNull(),
+  direction: integer("direction").notNull(), // -1 checkout, +1 return
+  status: text("status", { enum: ["normal", "lost", "damaged"] })
+    .notNull()
+    .default("normal"),
 });

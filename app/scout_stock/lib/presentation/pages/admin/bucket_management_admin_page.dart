@@ -1,54 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:scout_stock/data/api/api_client.dart';
+import 'package:scout_stock/domain/models/bucket.dart';
+import 'package:scout_stock/presentation/widgets/app_toast.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
+import 'package:scout_stock/state/providers/buckets_provider.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 import 'package:scout_stock/router/app_routes.dart';
 import 'package:scout_stock/presentation/pages/admin/bucket_upsert_page.dart';
 
-enum BucketStockState { fullyStocked, inUse, outOfStock }
-
-class BucketSummary {
-  const BucketSummary({
-    required this.id,
-    required this.name,
-    required this.itemTypeCount,
-    required this.lastActivityAt,
-    required this.state,
-    this.contentsPreview = const [],
-    this.tags = const [],
-  });
-
-  /// Human-readable bucket ID (e.g. SSB-BKT-042).
-  final String id;
-
-  final String name;
-
-  /// Count of distinct item types (not global stock).
-  final int itemTypeCount;
-
-  final DateTime lastActivityAt;
-
-  final BucketStockState state;
-
-  /// Small preview for search matching / hinting contents.
-  final List<String> contentsPreview;
-
-  final List<String> tags;
-}
-
-class BucketManagementAdminPage extends StatefulWidget {
+class BucketManagementAdminPage extends ConsumerStatefulWidget {
   const BucketManagementAdminPage({super.key});
 
   @override
-  State<BucketManagementAdminPage> createState() =>
+  ConsumerState<BucketManagementAdminPage> createState() =>
       _BucketManagementAdminPageState();
 }
 
-class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
+class _BucketManagementAdminPageState
+    extends ConsumerState<BucketManagementAdminPage> {
   static final PdfPageFormat _labelFormat = PdfPageFormat(
     4 * PdfPageFormat.inch,
     2 * PdfPageFormat.inch,
@@ -57,11 +32,7 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
 
   final _searchCtrl = TextEditingController();
   String _query = '';
-
   bool _printing = false;
-
-  late final List<BucketSummary> _seed = List<BucketSummary>.of(_mockBuckets())
-    ..sort((a, b) => b.lastActivityAt.compareTo(a.lastActivityAt));
 
   @override
   void dispose() {
@@ -69,85 +40,135 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
     super.dispose();
   }
 
+  // ── Error helper — mirrors users_page._showError exactly ──────────────
 
-  Future<void> _openCreateBucket() async {
-    final res = await context.push<Map<String, dynamic>>(AppRoutes.adminBucketCreate);
-    if (!mounted) return;
-    if (res == null) return;
+  void _showError(Object e, {required String action}) {
+    if (e is ApiException && e.hasFieldErrors) {
+      final toast = AppToast.of(context);
+      for (final fe in e.fieldErrors) {
+        toast.show(AppToastData.error(
+          title: fe.label,
+          subtitle: fe.message,
+          duration: const Duration(seconds: 6),
+        ));
+      }
+      return;
+    }
 
-    final contents = (res['contents'] as List?) ?? const [];
-    final now = DateTime.now();
-
-    setState(() {
-      _seed.insert(
-        0,
-        BucketSummary(
-          id: (res['barcode'] as String?) ?? 'SSB---000',
-          name: (res['name'] as String?) ?? 'New Bucket',
-          itemTypeCount: contents.length,
-          lastActivityAt: now,
-          state: contents.isEmpty ? BucketStockState.outOfStock : BucketStockState.fullyStocked,
-          contentsPreview: contents
-              .map((e) => (e as Map)['name']?.toString() ?? '')
-              .where((s) => s.trim().isNotEmpty)
-              .take(3)
-              .toList(),
-        ),
-      );
-    });
+    final msg = e is ApiException
+        ? e.message
+        : 'Something went wrong. Please try again.';
+    AppToast.of(context).show(AppToastData.error(
+      title: action,
+      subtitle: msg,
+      duration: const Duration(seconds: 5),
+    ));
   }
 
-  Future<void> _openEditBucket(BucketSummary b) async {
-    final seeds = b.contentsPreview
-        .map((n) => BucketContentSeed(name: n, emoji: '📦', quantity: 1))
+  // ── Create ────────────────────────────────────────────────────────────
+
+  Future<void> _openCreateBucket() async {
+    final res = await context.push<Map<String, dynamic>>(
+      AppRoutes.adminBucketCreate,
+    );
+    if (!mounted || res == null) return;
+
+    final name = (res['name'] ?? '').toString();
+    final abbreviation = (res['abbreviation'] ?? '').toString();
+    final contents =
+        (res['contents'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+
+    try {
+      final created = await ref.read(bucketsProvider.notifier).createBucket(
+            name: name,
+            abbreviation: abbreviation,
+            items: contents,
+          );
+      if (!mounted) return;
+
+      final itemCount = created.items.length;
+      final itemLabel = itemCount == 1 ? '1 item' : '$itemCount items';
+
+      AppToast.of(context).show(AppToastData.success(
+        title: '$name created',
+        subtitle: '#${created.barcode}  ·  $itemLabel',
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      _showError(e, action: 'Could not create $name');
+    }
+  }
+
+  // ── Edit ──────────────────────────────────────────────────────────────
+
+  Future<void> _openEditBucket(Bucket bucket) async {
+    final seeds = bucket.items
+        .map((i) => BucketContentSeed(
+              id: i.id,
+              name: i.name,
+              emoji: i.emoji,
+              quantity: i.quantity,
+              borrowed: i.borrowed,
+            ))
         .toList();
 
     final args = BucketUpsertArgs(
-      barcode: b.id,
-      name: b.name,
-      emoji: '🪣',
+      bucketId: bucket.id,
+      barcode: bucket.barcode,
+      name: bucket.name,
       contents: seeds,
     );
 
     final res = await context.push<Map<String, dynamic>>(
-      AppRoutes.adminBucketEdit(b.id),
+      AppRoutes.adminBucketEdit(bucket.barcode),
       extra: args,
     );
 
-    if (!mounted) return;
-    if (res == null) return;
+    if (!mounted || res == null) return;
 
-    final contents = (res['contents'] as List?) ?? const [];
-    final now = DateTime.now();
+    final newName = (res['name'] as String?) ?? bucket.name;
+    final contents =
+        (res['contents'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
-    setState(() {
-      final idx = _seed.indexWhere((x) => x.id == b.id);
-      if (idx == -1) return;
+    try {
+      final updated = await ref.read(bucketsProvider.notifier).updateBucket(
+            bucket.id,
+            name: newName,
+            items: contents,
+          );
+      if (!mounted) return;
 
-      _seed[idx] = BucketSummary(
-        id: (res['barcode'] as String?) ?? b.id,
-        name: (res['name'] as String?) ?? b.name,
-        itemTypeCount: contents.length,
-        lastActivityAt: now,
-        state: contents.isEmpty ? BucketStockState.outOfStock : BucketStockState.fullyStocked,
-        tags: _seed[idx].tags,
-        contentsPreview: contents
-            .map((e) => (e as Map)['name']?.toString() ?? '')
-            .where((s) => s.trim().isNotEmpty)
-            .take(3)
-            .toList(),
-      );
-    });
+      // Build descriptive subtitle about what changed.
+      final changes = <String>[];
+      if (newName != bucket.name) changes.add('${bucket.name} → $newName');
+      if (updated.items.length != bucket.items.length) {
+        changes.add('${bucket.items.length} → ${updated.items.length} items');
+      } else {
+        changes.add('Items updated');
+      }
+
+      final displayName = newName != bucket.name ? newName : bucket.name;
+      AppToast.of(context).show(AppToastData.success(
+        title: '$displayName updated',
+        subtitle: changes.join('  ·  '),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      _showError(e, action: 'Could not update ${bucket.name}');
+    }
   }
 
-  Future<void> _confirmDelete(BucketSummary b) async {
+  // ── Delete ────────────────────────────────────────────────────────────
+
+  Future<void> _confirmDelete(Bucket bucket) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete bucket?'),
         content: Text(
-          'This will remove "${b.name}" (#${b.id}).\n\n'
-          'Inventory history stays in the audit log, but the bucket will no longer be available to scan.',
+          'This will remove "${bucket.name}" (#${bucket.barcode}).\n\n'
+          'Inventory history stays in the audit log, but the bucket will '
+          'no longer be available to scan.',
         ),
         actions: [
           TextButton(
@@ -166,16 +187,30 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
       ),
     );
 
-    if (!mounted) return;
-    if (ok != true) return;
+    if (!mounted || ok != true) return;
 
-    setState(() => _seed.removeWhere((x) => x.id == b.id));
+    try {
+      await ref.read(bucketsProvider.notifier).deleteBucket(bucket.id);
+      if (!mounted) return;
+
+      final itemLabel =
+          bucket.items.length == 1 ? '1 item' : '${bucket.items.length} items';
+      AppToast.of(context).show(AppToastData.success(
+        title: '${bucket.name} removed',
+        subtitle: '#${bucket.barcode}  ·  $itemLabel cleared',
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      _showError(e, action: 'Could not delete ${bucket.name}');
+    }
   }
 
-  Future<void> _printBucketLabel(BucketSummary bucket) async {
+  // ── Print ─────────────────────────────────────────────────────────────
+
+  Future<void> _printBucketLabel(Bucket bucket) async {
     if (_printing) return;
 
-    final id = bucket.id.trim();
+    final id = bucket.barcode.trim();
     String safeFileName(String s) {
       final cleaned = s.trim().replaceAll(RegExp(r'[\\/:*?"<>|]+'), ' ');
       return cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -189,12 +224,8 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
         onLayout: (format) async {
           final doc = pw.Document();
 
-          // Compute a barcode height that always fits.
-          // (Keeps the ID line visible even on 2" tall labels.)
           final barcodeH =
-              (format.height - 78) // reserve space for texts + padding
-                  .clamp(44.0, 66.0)
-                  .toDouble();
+              (format.height - 78).clamp(44.0, 66.0).toDouble();
 
           doc.addPage(
             pw.Page(
@@ -248,11 +279,13 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
         },
       );
     } catch (_) {
-      debugPrint('Could not print label for ${bucket.id}');
+      debugPrint('Could not print label for ${bucket.barcode}');
     } finally {
       if (mounted) setState(() => _printing = false);
     }
   }
+
+  // ── Build ─────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -262,24 +295,9 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
     final mediaTop = MediaQuery.of(context).padding.top;
     final safeBottom = MediaQuery.of(context).padding.bottom;
 
-    final q = _query.trim().toLowerCase();
-    final items = q.isEmpty
-        ? _seed
-        : _seed
-              .where((b) {
-                if (b.name.toLowerCase().contains(q)) return true;
-                if (b.id.toLowerCase().contains(q)) return true;
-                if (b.tags.any((x) => x.toLowerCase().contains(q))) return true;
-                if (b.contentsPreview.any((x) => x.toLowerCase().contains(q))) {
-                  return true;
-                }
-                return false;
-              })
-              .toList(growable: false);
+    final bucketsAsync = ref.watch(bucketsProvider);
 
-    final isEmpty = items.isEmpty;
-
-    // Match AdminShell bottom nav footprint (height 78 + padding 12)
+    // Match AdminShell bottom nav footprint
     const navHeight = 78.0;
     const navPad = 12.0;
     final bottomFootprint = safeBottom + navHeight + navPad + 10;
@@ -289,98 +307,137 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
       body: Stack(
         children: [
           const Positioned.fill(child: DottedBackground()),
-          SafeArea(
-            top: false,
-            child: CustomScrollView(
-              cacheExtent: 900,
-              slivers: [
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
-                    child: _ManageHeader(
-                      onAdd: _openCreateBucket,
-                    ),
+          bucketsAsync.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (err, _) => Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline, size: 48, color: AppColors.muted),
+                  const SizedBox(height: 12),
+                  Text('Failed to load buckets', style: t.titleMedium),
+                  const SizedBox(height: 4),
+                  Text('$err',
+                      style: t.bodySmall?.copyWith(color: AppColors.muted)),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: () => ref.invalidate(bucketsProvider),
+                    child: const Text('Retry'),
                   ),
-                ),
+                ],
+              ),
+            ),
+            data: (allBuckets) {
+              final q = _query.trim().toLowerCase();
+              final items = q.isEmpty
+                  ? allBuckets
+                  : allBuckets.where((b) {
+                      if (b.name.toLowerCase().contains(q)) return true;
+                      if (b.barcode.toLowerCase().contains(q)) return true;
+                      if (b.items.any(
+                          (i) => i.name.toLowerCase().contains(q))) {
+                        return true;
+                      }
+                      return false;
+                    }).toList(growable: false);
 
-                // Sticky search (same size/style/position as Users & Activity)
-                SliverPersistentHeader(
-                  pinned: true,
-                  delegate: _StickyHeaderDelegate(
-                    height: 70,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-                      child: _SearchCard(
-                        controller: _searchCtrl,
-                        hintText: 'Search ID, tag, or contents…',
-                        onChanged: (v) => setState(() => _query = v),
+              final isEmpty = items.isEmpty;
+
+              return SafeArea(
+                top: false,
+                child: CustomScrollView(
+                  cacheExtent: 900,
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
+                        child: _ManageHeader(onAdd: _openCreateBucket),
                       ),
                     ),
-                  ),
-                ),
 
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'ALL BUCKETS',
-                            style: t.labelMedium?.copyWith(
-                              color: AppColors.muted,
-                            ),
+                    // Sticky search
+                    SliverPersistentHeader(
+                      pinned: true,
+                      delegate: _StickyHeaderDelegate(
+                        height: 70,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+                          child: _SearchCard(
+                            controller: _searchCtrl,
+                            hintText: 'Search ID, name, or contents…',
+                            onChanged: (v) => setState(() => _query = v),
                           ),
                         ),
-                        Text(
-                          'STATUS',
-                          style: t.labelMedium?.copyWith(
-                            color: AppColors.muted,
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
 
-                if (isEmpty)
-                  SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: _EmptyBucketsState(
-                      query: q,
-                      emojiBase: emojiBase.copyWith(fontSize: 54),
-                      titleStyle: t.titleLarge,
-                      bodyStyle: t.bodyLarge?.copyWith(color: AppColors.muted),
-                    ),
-                  )
-                else
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-                    sliver: SliverList(
-                      delegate: SliverChildBuilderDelegate((context, index) {
-                        final b = items[index];
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: RepaintBoundary(
-                            child: _BucketCard(
-                              bucket: b,
-                              radiusXl: tokens.radiusXl,
-                              onEdit: () => _openEditBucket(b),
-                              onPrint: () => _printBucketLabel(b),
-                              onDelete: () => _confirmDelete(b),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'ALL BUCKETS',
+                                style: t.labelMedium?.copyWith(
+                                  color: AppColors.muted,
+                                ),
+                              ),
                             ),
-                          ),
-                        );
-                      }, childCount: items.length),
+                            Text(
+                              'STATUS',
+                              style: t.labelMedium?.copyWith(
+                                color: AppColors.muted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
 
-                SliverToBoxAdapter(child: SizedBox(height: bottomFootprint)),
-              ],
-            ),
+                    if (isEmpty)
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: _EmptyBucketsState(
+                          query: q,
+                          emojiBase: emojiBase.copyWith(fontSize: 54),
+                          titleStyle: t.titleLarge,
+                          bodyStyle:
+                              t.bodyLarge?.copyWith(color: AppColors.muted),
+                        ),
+                      )
+                    else
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                        sliver: SliverList(
+                          delegate:
+                              SliverChildBuilderDelegate((context, index) {
+                            final b = items[index];
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: RepaintBoundary(
+                                child: _BucketCard(
+                                  bucket: b,
+                                  radiusXl: tokens.radiusXl,
+                                  onEdit: () => _openEditBucket(b),
+                                  onPrint: () => _printBucketLabel(b),
+                                  onDelete: () => _confirmDelete(b),
+                                ),
+                              ),
+                            );
+                          }, childCount: items.length),
+                        ),
+                      ),
+
+                    SliverToBoxAdapter(
+                        child: SizedBox(height: bottomFootprint)),
+                  ],
+                ),
+              );
+            },
           ),
 
-          // Small UX safety: block double-taps while print dialog is preparing.
+          // Print overlay
           if (_printing)
             Positioned.fill(
               child: IgnorePointer(
@@ -395,7 +452,8 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
                     ),
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(tokens.radiusLg),
+                      borderRadius:
+                          BorderRadius.circular(tokens.radiusLg),
                       boxShadow: tokens.cardShadow,
                       border: Border.all(color: AppColors.outline),
                     ),
@@ -405,13 +463,14 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
                         const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2.4),
+                          child:
+                              CircularProgressIndicator(strokeWidth: 2.4),
                         ),
                         const SizedBox(width: 10),
                         Text(
                           'Preparing label…',
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w800),
+                          style: t.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800),
                         ),
                       ],
                     ),
@@ -425,9 +484,12 @@ class _BucketManagementAdminPageState extends State<BucketManagementAdminPage> {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Private widgets
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _ManageHeader extends StatelessWidget {
   const _ManageHeader({required this.onAdd});
-
   final VoidCallback onAdd;
 
   @override
@@ -455,7 +517,6 @@ class _ManageHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 10),
-        // Match Users page circular "New" button (not the design mock)
         DecoratedBox(
           decoration: BoxDecoration(
             color: AppColors.primary,
@@ -492,9 +553,8 @@ class _BucketCard extends StatelessWidget {
     required this.onDelete,
   });
 
-  final BucketSummary bucket;
+  final Bucket bucket;
   final double radiusXl;
-
   final VoidCallback onEdit;
   final VoidCallback onPrint;
   final VoidCallback onDelete;
@@ -504,7 +564,7 @@ class _BucketCard extends StatelessWidget {
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
 
-    final timeText = _formatRelative(bucket.lastActivityAt);
+    final timeText = _formatRelative(DateTime.parse(bucket.createdAt));
 
     final nameStyle = t.titleMedium?.copyWith(
       fontSize: 18,
@@ -549,18 +609,21 @@ class _BucketCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      _StockPill(state: bucket.state),
+                      _StockPill(state: bucket.stockState),
                     ],
                   ),
                   const SizedBox(height: 6),
                   Align(
                     alignment: Alignment.centerLeft,
-                    child: Text('#${bucket.id}', style: idStyle),
+                    child: Text('#${bucket.barcode}', style: idStyle),
                   ),
                   const SizedBox(height: 14),
                   Row(
                     children: [
-                      Text('${bucket.itemTypeCount} Items', style: metaStyle),
+                      Text(
+                        '${bucket.items.length} Items',
+                        style: metaStyle,
+                      ),
                       const Spacer(),
                       Text(timeText, style: metaStyle),
                     ],
@@ -771,22 +834,17 @@ class _SearchCard extends StatelessWidget {
 
 class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   _StickyHeaderDelegate({required this.height, required this.child});
-
   final double height;
   final Widget child;
 
   @override
   double get minExtent => height;
-
   @override
   double get maxExtent => height;
 
   @override
   Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
+      BuildContext context, double shrinkOffset, bool overlapsContent) {
     return child;
   }
 
@@ -815,7 +873,6 @@ class _EmptyBucketsState extends StatelessWidget {
     final subtitle = query.isEmpty
         ? 'Create your first bucket to start tracking inventory'
         : 'Try a different keyword';
-
     final emoji = query.isEmpty ? '🪣' : '🔎';
 
     return Center(
@@ -849,46 +906,4 @@ String _formatRelative(DateTime dt) {
   if (weeks < 5) return '${weeks}w ago';
 
   return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
-}
-
-List<BucketSummary> _mockBuckets() {
-  final now = DateTime.now();
-  return [
-    BucketSummary(
-      id: 'SSB-BKT-042',
-      name: 'Patrol Box A',
-      itemTypeCount: 12,
-      lastActivityAt: now.subtract(const Duration(hours: 2)),
-      state: BucketStockState.fullyStocked,
-      tags: const ['patrol', 'box'],
-      contentsPreview: const ['Flags', 'Rope', 'Tape'],
-    ),
-    BucketSummary(
-      id: 'SSB-BKT-088',
-      name: 'Tools Kit #3',
-      itemTypeCount: 8,
-      lastActivityAt: now.subtract(const Duration(minutes: 45)),
-      state: BucketStockState.inUse,
-      tags: const ['tools'],
-      contentsPreview: const ['Pliers', 'Screwdriver', 'Tape'],
-    ),
-    BucketSummary(
-      id: 'SSB-BKT-012',
-      name: 'First Aid Base',
-      itemTypeCount: 45,
-      lastActivityAt: now.subtract(const Duration(days: 1)),
-      state: BucketStockState.fullyStocked,
-      tags: const ['medical', 'first-aid'],
-      contentsPreview: const ['Bandages', 'Gloves', 'Alcohol swabs'],
-    ),
-    BucketSummary(
-      id: 'SSB-BKT-031',
-      name: 'Craft Supplies',
-      itemTypeCount: 0,
-      lastActivityAt: now.subtract(const Duration(days: 3)),
-      state: BucketStockState.outOfStock,
-      tags: const ['craft'],
-      contentsPreview: const ['Paper', 'Markers'],
-    ),
-  ];
 }
