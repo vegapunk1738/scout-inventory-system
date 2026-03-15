@@ -62,144 +62,152 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
   /// fires one toast per field so each is individually readable and
   /// dismissible. Otherwise shows a single toast.
   void _showError(Object e, {required String action}) {
+    if (!mounted) return;
     if (e is ApiException && e.hasFieldErrors) {
       final toast = AppToast.of(context);
-      // Stagger slightly so the Z-stack fans out nicely.
       for (final fe in e.fieldErrors) {
-        toast.show(AppToastData.error(
-          title: fe.label,
-          subtitle: fe.message,
-          duration: const Duration(seconds: 6),
-        ));
+        toast.show(
+          AppToastData.error(
+            title: fe.label,
+            subtitle: fe.message,
+            duration: const Duration(seconds: 6),
+          ),
+        );
       }
       return;
     }
 
-    // Simple error — single toast.
     final msg = e is ApiException
         ? e.message
         : 'Something went wrong. Please try again.';
-    AppToast.of(context).show(AppToastData.error(
-      title: action,
-      subtitle: msg,
-      duration: const Duration(seconds: 5),
-    ));
+    AppToast.of(context).show(
+      AppToastData.error(
+        title: action,
+        subtitle: msg,
+        duration: const Duration(seconds: 5),
+      ),
+    );
   }
 
   // ── Actions ────────────────────────────────────────────────────────────
 
+  /// ---------------------------------------------------------------
+  /// FIX: The create/edit callbacks now perform the API call
+  /// *before* the upsert page pops, via [UpsertCallbacks]. This
+  /// eliminates the race between GoRouter's pop-result delivery and
+  /// widget lifecycle. The upsert page calls the callback, awaits
+  /// the result, and only then pops — so the API call is guaranteed
+  /// to fire regardless of the parent's mounted state.
+  /// ---------------------------------------------------------------
+
   Future<void> _onAdd() async {
-    // Fetch the next available scout_id before opening the form.
     String nextId = '';
     try {
       nextId = await ref.read(usersProvider.notifier).fetchNextScoutId();
-    } catch (_) {
-      // If the fetch fails, the form will still work — ID field is editable.
-    }
+    } catch (_) {}
     if (!mounted) return;
 
-    final res = await context.push<Map<String, dynamic>>(
+    // Store ref-based notifier before the async gap so we don't depend
+    // on `ref` being valid after the push returns.
+    final notifier = ref.read(usersProvider.notifier);
+
+    await context.push<void>(
       AppRoutes.adminUserCreate,
-      extra: CreateUserArgs(nextScoutId: nextId),
-    );
-    if (!mounted || res == null) return;
+      extra: CreateUserArgs(
+        nextScoutId: nextId,
+        onSubmit: (result) async {
+          final scoutId = (result['scoutId'] ?? '').toString();
+          final fullName = (result['displayName'] ?? '').toString();
+          final role = (result['role'] ?? 'scout').toString();
+          final password = (result['password'] ?? '').toString();
 
-    final scoutId = (res['scoutId'] ?? '').toString();
-    final fullName = (res['displayName'] ?? '').toString();
-    final role = (res['role'] ?? 'scout').toString();
-    final password = (res['password'] ?? '').toString();
-
-    try {
-      final created = await ref.read(usersProvider.notifier).createUser(
+          final created = await notifier.createUser(
             scoutId: scoutId,
             fullName: fullName,
             password: password,
             role: role,
           );
-      if (!mounted) return;
 
-      // Use the actual scoutId from the response — the backend may have
-      // auto-incremented it if a concurrent conflict occurred.
-      final roleLabel = role == 'admin' ? 'Admin' : 'Scout';
-      AppToast.of(context).show(
-        AppToastData.success(
-          title: '$fullName joined the team',
-          subtitle: '$roleLabel  ·  ID #${created.scoutId}',
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      _showError(e, action: 'Could not create $fullName');
-    }
+          // Toast is fire-and-forget; safe to check mounted here because
+          // the upsert page is still on screen (it hasn't popped yet).
+          if (mounted) {
+            final roleLabel = role == 'admin' ? 'Admin' : 'Scout';
+            AppToast.of(context).show(
+              AppToastData.success(
+                title: 'Created: $fullName',
+                subtitle: '$roleLabel  ·  ID #${created.scoutId}',
+              ),
+            );
+          }
+        },
+      ),
+    );
   }
 
   Future<void> _onEdit(ManagedUser user) async {
     if (user.isSuperAdmin) return;
 
-    final res = await context.push<Map<String, dynamic>>(
+    final notifier = ref.read(usersProvider.notifier);
+    final authNotifier = ref.read(authControllerProvider.notifier);
+
+    await context.push<void>(
       AppRoutes.adminUserEdit(user.scoutId),
       extra: UserUpsertArgs(
         scoutId: user.scoutId,
         displayName: user.fullName,
         role: user.role.toJson(),
-      ),
-    );
-    if (!mounted || res == null) return;
+        onSubmit: (result) async {
+          final newName = result['displayName'] as String?;
+          final newRole = result['role'] as String?;
+          final newPassword = result['newPassword'] as String?;
 
-    final newName = res['displayName'] as String?;
-    final newRole = res['role'] as String?;
-    final newPassword = res['newPassword'] as String?;
+          final nameChanged = newName != null && newName != user.fullName;
+          final roleChanged = newRole != null && newRole != user.role.toJson();
+          final pwChanged =
+              newPassword != null && newPassword.trim().isNotEmpty;
 
-    final nameChanged = newName != null && newName != user.fullName;
-    final roleChanged = newRole != null && newRole != user.role.toJson();
-    final pwChanged = newPassword != null && newPassword.trim().isNotEmpty;
+          if (!nameChanged && !roleChanged && !pwChanged) return;
 
-    if (!nameChanged && !roleChanged && !pwChanged) return;
-
-    try {
-      await ref
-          .read(usersProvider.notifier)
-          .updateUser(
+          await notifier.updateUser(
             user.scoutId,
             fullName: nameChanged ? newName : null,
             role: roleChanged ? newRole : null,
             password: pwChanged ? newPassword : null,
           );
 
-      // Build a descriptive subtitle about what exactly changed.
-      final changes = <String>[];
-      if (nameChanged) changes.add('${user.fullName} → $newName');
-      if (roleChanged) {
-        final oldLabel = user.role.isAdmin ? 'Admin' : 'Scout';
-        final newLabel = newRole == 'admin' ? 'Admin' : 'Scout';
-        changes.add('$oldLabel → $newLabel');
-      }
-      if (pwChanged) changes.add('Password reset');
+          // Build toast info.
+          final changes = <String>[];
+          if (nameChanged) changes.add('${user.fullName} → $newName');
+          if (roleChanged) {
+            final oldLabel = user.role.isAdmin ? 'Admin' : 'Scout';
+            final newLabel = newRole == 'admin' ? 'Admin' : 'Scout';
+            changes.add('$oldLabel → $newLabel');
+          }
+          if (pwChanged) changes.add('Password reset');
 
-      final displayName = nameChanged ? newName : user.fullName;
+          final displayName = nameChanged ? newName : user.fullName;
 
-      // If the admin changed their own role or name, refresh the JWT.
-      final currentUser = ref.read(currentUserProvider);
-      final editedSelf =
-          currentUser != null && currentUser.scoutId == user.scoutId;
+          // Refresh JWT if the admin edited themselves.
+          final currentUser = ref.read(currentUserProvider);
+          final editedSelf =
+              currentUser != null && currentUser.scoutId == user.scoutId;
+          if (editedSelf && (roleChanged || nameChanged)) {
+            try {
+              await authNotifier.refreshSession();
+            } catch (_) {}
+          }
 
-      if (editedSelf && (roleChanged || nameChanged)) {
-        try {
-          await ref.read(authControllerProvider.notifier).refreshSession();
-        } catch (_) {}
-      }
-
-      if (!mounted) return;
-      AppToast.of(context).show(
-        AppToastData.success(
-          title: '$displayName updated',
-          subtitle: changes.join('  ·  '),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      _showError(e, action: 'Could not update ${user.fullName}');
-    }
+          if (mounted) {
+            AppToast.of(context).show(
+              AppToastData.success(
+                title: 'Updated: $displayName',
+                subtitle: changes.join('  ·  '),
+              ),
+            );
+          }
+        },
+      ),
+    );
   }
 
   Future<void> _onDelete(ManagedUser user) async {
@@ -249,7 +257,7 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
       final roleLabel = user.role.isAdmin ? 'Admin' : 'Scout';
       AppToast.of(context).show(
         AppToastData.success(
-          title: '${user.fullName} removed',
+          title: 'Deleted: ${user.fullName}',
           subtitle: '$roleLabel #${user.scoutId} deleted from the team',
         ),
       );
@@ -319,10 +327,10 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
 
               data: (allUsers) {
                 final items = _filterAndSort(allUsers);
-                final scoutCount =
-                    allUsers.where((u) => !u.role.isAdmin).length;
-                final adminCount =
-                    allUsers.where((u) => u.role.isAdmin).length;
+                final scoutCount = allUsers
+                    .where((u) => !u.role.isAdmin)
+                    .length;
+                final adminCount = allUsers.where((u) => u.role.isAdmin).length;
                 final isEmpty = items.isEmpty;
 
                 return RefreshIndicator(
@@ -785,8 +793,8 @@ class _ExpandableMemberCard extends StatelessWidget {
     final stripColor = isSuperAdmin
         ? const Color(0xFFFFB300)
         : isAdmin
-            ? AppColors.primary
-            : const Color(0xFFE1E6ED);
+        ? AppColors.primary
+        : const Color(0xFFE1E6ED);
 
     return ValueListenableBuilder<bool>(
       valueListenable: expanded,
@@ -817,8 +825,9 @@ class _ExpandableMemberCard extends StatelessWidget {
                           backgroundColor: AppColors.background,
                           child: Text(
                             initials,
-                            style: t.titleMedium
-                                ?.copyWith(fontWeight: FontWeight.w800),
+                            style: t.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ),
                         if (isSuperAdmin)
@@ -886,8 +895,7 @@ class _ExpandableMemberCard extends StatelessWidget {
                   firstChild: const SizedBox.shrink(),
                   secondChild: isSuperAdmin
                       ? const _ProtectedDetailsBlock()
-                      : _MemberDetailsBlock(
-                          onEdit: onEdit, onDelete: onDelete),
+                      : _MemberDetailsBlock(onEdit: onEdit, onDelete: onDelete),
                 ),
               ],
             ),
@@ -1000,13 +1008,13 @@ class _RoleChip extends StatelessWidget {
     final bg = isSuperAdmin
         ? const Color(0xFFFFF3D0)
         : isAdmin
-            ? AppColors.primary
-            : Colors.white;
+        ? AppColors.primary
+        : Colors.white;
     final fg = isSuperAdmin
         ? const Color(0xFF8B6914)
         : isAdmin
-            ? Colors.white
-            : AppColors.muted;
+        ? Colors.white
+        : AppColors.muted;
     final label = isSuperAdmin ? 'OWNER' : (isAdmin ? 'ADMIN' : 'SCOUT');
 
     return Container(
@@ -1017,8 +1025,8 @@ class _RoleChip extends StatelessWidget {
         border: isSuperAdmin
             ? Border.all(color: const Color(0xFFFFB300))
             : isAdmin
-                ? null
-                : Border.all(color: AppColors.outline),
+            ? null
+            : Border.all(color: AppColors.outline),
       ),
       child: Text(
         label,

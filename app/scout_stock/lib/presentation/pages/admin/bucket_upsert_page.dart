@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:scout_stock/data/api/api_client.dart';
+import 'package:scout_stock/presentation/widgets/app_toast.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
 import 'package:scout_stock/presentation/widgets/hold_icon_button.dart';
@@ -11,12 +13,32 @@ import 'package:scout_stock/theme/app_theme.dart';
 
 import '../../widgets/attention_text_field_widget.dart';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Callback type — the upsert page calls this *before* popping so the API
+// request fires regardless of the parent page's lifecycle state.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Async callback that performs the actual API mutation.
+/// Throws on failure so the upsert page can surface the error and let the
+/// user retry without losing their input.
+typedef BucketUpsertSubmitCallback =
+    Future<void> Function(Map<String, dynamic> result);
+
+/// Passed as extra when navigating to the create page.
+class CreateBucketArgs {
+  const CreateBucketArgs({required this.onSubmit});
+
+  /// Called with the form payload. Must complete the API call before
+  /// returning. Throw to signal failure.
+  final BucketUpsertSubmitCallback onSubmit;
+}
+
 /// Navigation args for editing an existing bucket.
-/// (For create, push the route with no extra.)
 class BucketUpsertArgs {
   const BucketUpsertArgs({
     required this.barcode,
     required this.name,
+    required this.onSubmit,
     this.bucketId,
     this.contents = const [],
     @Deprecated('Bucket emojis are no longer used in the UI.')
@@ -35,6 +57,10 @@ class BucketUpsertArgs {
   final String emoji;
 
   final List<BucketContentSeed> contents;
+
+  /// Called with the form payload. Must complete the API call before
+  /// returning. Throw to signal failure.
+  final BucketUpsertSubmitCallback onSubmit;
 }
 
 class BucketContentSeed {
@@ -57,9 +83,10 @@ class BucketContentSeed {
 }
 
 class BucketUpsertPage extends StatefulWidget {
-  const BucketUpsertPage({super.key, this.editArgs});
+  const BucketUpsertPage({super.key, this.editArgs, this.createArgs});
 
   final BucketUpsertArgs? editArgs;
+  final CreateBucketArgs? createArgs;
 
   @override
   State<BucketUpsertPage> createState() => _BucketUpsertPageState();
@@ -131,7 +158,6 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
     final clean = raw.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
     if (clean.isEmpty) return '---';
 
-    // Prefer letters when possible.
     final lettersOnly = clean.replaceAll(RegExp(r'[^A-Z]'), '');
     if (lettersOnly.length >= 3) return lettersOnly.substring(0, 3);
 
@@ -175,7 +201,6 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
   void _removeItem(int index) {
     final item = _items[index];
 
-    // Can't remove items that have active borrowings.
     if (item.borrowed > 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -212,6 +237,39 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
       item.quantity = next;
     });
   }
+
+  // ── Error display ──────────────────────────────────────────────────────
+
+  void _showSubmitError(Object e) {
+    if (!mounted) return;
+
+    if (e is ApiException && e.hasFieldErrors) {
+      final toast = AppToast.of(context);
+      for (final fe in e.fieldErrors) {
+        toast.show(
+          AppToastData.error(
+            title: fe.label,
+            subtitle: fe.message,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+      return;
+    }
+
+    final msg = e is ApiException
+        ? e.message
+        : 'Something went wrong. Please try again.';
+    AppToast.of(context).show(
+      AppToastData.error(
+        title: _isEdit ? 'Update failed' : 'Creation failed',
+        subtitle: msg,
+        duration: const Duration(seconds: 5),
+      ),
+    );
+  }
+
+  // ── Submit ─────────────────────────────────────────────────────────────
 
   Future<void> _submit() async {
     if (_saving) return;
@@ -259,28 +317,45 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
     }
 
     setState(() => _saving = true);
-    FocusScope.of(context).unfocus();
 
-    // ─── Pop form data back to the management page ──────────────────
-    // The management page handles the API call + toasts.
-    // This mirrors user_upsert_page._submit() exactly.
-    context.pop<Map<String, dynamic>>({
-      'name': name,
-      'abbreviation': _abbreviation,
-      'barcode': _barcode,
-      if (_isEdit && widget.editArgs?.bucketId != null)
-        'bucketId': widget.editArgs!.bucketId,
-      'contents': _items
-          .map(
-            (x) => {
-              if (x.existingId != null) 'id': x.existingId!,
-              'name': x.nameCtrl.text.trim(),
-              'emoji': x.emoji,
-              'quantity': x.quantity,
-            },
-          )
-          .toList(),
-    });
+    try {
+      FocusScope.of(context).unfocus();
+
+      // Build the result payload.
+      final payload = <String, dynamic>{
+        'name': name,
+        'abbreviation': _abbreviation,
+        'barcode': _barcode,
+        if (_isEdit && widget.editArgs?.bucketId != null)
+          'bucketId': widget.editArgs!.bucketId,
+        'contents': _items
+            .map(
+              (x) => {
+                if (x.existingId != null) 'id': x.existingId!,
+                'name': x.nameCtrl.text.trim(),
+                'emoji': x.emoji,
+                'quantity': x.quantity,
+              },
+            )
+            .toList(),
+      };
+
+      // FIX: Call the mutation callback *here*, while we're still mounted.
+      // Only pop on success — on failure the user stays on the form.
+      final callback = _isEdit
+          ? widget.editArgs!.onSubmit
+          : widget.createArgs!.onSubmit;
+      await callback(payload);
+
+      // API call succeeded — now pop.
+      if (mounted) context.pop();
+    } catch (e) {
+      // Surface the error on this page so the user can retry.
+      _showSubmitError(e);
+    } finally {
+      // Always reset _saving so the button is never permanently disabled.
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -299,8 +374,6 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
 
     final contentsCount = _items.length;
 
-    // Extra breathing room at the end of the scroll so the sticky button
-    // doesn't feel like it "cuts off" the end of the list.
     final bottomScrollPad = compact ? 170.0 : 190.0;
 
     return Scaffold(
@@ -336,7 +409,7 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
                 ),
                 const SizedBox(height: 22),
 
-                // Bucket name card (NO bucket emoji)
+                // Bucket name card
                 Container(
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -434,7 +507,7 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
                     physics: const NeverScrollableScrollPhysics(),
                     shrinkWrap: true,
                     itemCount: _items.length,
-                    separatorBuilder: (_, _) =>
+                    separatorBuilder: (_, __) =>
                         SizedBox(height: compact ? 10 : 12),
                     itemBuilder: (context, i) {
                       final it = _items[i];
@@ -472,7 +545,6 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
                     ),
                   ),
 
-                // Extra spacer so the end never feels "cut off" while scrolling.
                 const SizedBox(height: 24),
               ],
             ),
@@ -480,7 +552,6 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
         ],
       ),
 
-      // Sticky bottom action
       bottomNavigationBar: GlowingActionButton(
         label: _isEdit ? 'Save Changes' : 'Create Bucket',
         icon: const Icon(Icons.check_rounded),
@@ -503,7 +574,6 @@ class _ContentDraft {
 
   final GlobalKey cardKey = GlobalKey();
 
-  // NEW: so we can trigger the same "attention invalid" UX as bucket name.
   final GlobalKey<AttentionTextFieldState> nameKey =
       GlobalKey<AttentionTextFieldState>();
 
@@ -619,7 +689,7 @@ class _ContentItemCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tile = compact ? 42.0 : 48.0; // uniform height target
+    final tile = compact ? 42.0 : 48.0;
     final emojiSize = compact ? 22.0 : 26.0;
 
     final shadow = tokens.cardShadow.isNotEmpty
@@ -678,14 +748,13 @@ class _ContentItemCard extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               _TrashSquareButton(
-                size: tile, // make the X same height as emoji + field
+                size: tile,
                 onTap: onRemove,
                 disabled: hasBorrowed,
               ),
             ],
           ),
 
-          // Borrowed indicator
           if (hasBorrowed) ...[
             SizedBox(height: compact ? 8 : 10),
             Container(
@@ -736,8 +805,6 @@ class _ContentItemCard extends StatelessWidget {
   }
 }
 
-/// Uses the SAME AttentionTextField as the bucket name.
-/// Styled to be "thick" and uniform with the emoji tile + X button.
 class _ItemNameAttentionField extends StatelessWidget {
   const _ItemNameAttentionField({
     super.key,
@@ -776,7 +843,6 @@ class _ItemNameAttentionField extends StatelessWidget {
       allowPattern: r'[A-Za-z0-9() ]',
       uppercase: false,
       maxLength: 48,
-      // Padding tuned to look "thick" like the bucket name, but slightly smaller.
       contentPadding: EdgeInsets.symmetric(
         horizontal: 14,
         vertical: compact ? 12 : 14,

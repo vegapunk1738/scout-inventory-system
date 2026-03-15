@@ -10,8 +10,6 @@ import 'package:scout_stock/presentation/pages/admin/bucket_upsert_page.dart';
 import 'package:scout_stock/presentation/pages/admin/user_upsert_page.dart';
 import 'package:scout_stock/presentation/pages/admin/users_page.dart';
 import 'package:scout_stock/presentation/pages/bucket_loader_page.dart';
-import 'package:scout_stock/presentation/pages/bucket_mixed_items_page.dart';
-import 'package:scout_stock/presentation/pages/bucket_single_item_page.dart';
 import 'package:scout_stock/presentation/pages/cart_page.dart';
 import 'package:scout_stock/presentation/pages/login_page.dart';
 import 'package:scout_stock/presentation/pages/manual_entry_page.dart';
@@ -191,17 +189,25 @@ final goRouterProvider = Provider<GoRouter>((ref) {
 
           final args = extra is UserUpsertArgs
               ? extra
-              : UserUpsertArgs(scoutId: id, displayName: '', role: 'scout');
+              : UserUpsertArgs(
+                  scoutId: id,
+                  displayName: '',
+                  role: 'scout',
+                  onSubmit: (_) async {},
+                );
 
           return UserUpsertPage(editArgs: args);
         },
       ),
-
       GoRoute(
         parentNavigatorKey: _rootNavKey,
         path: AppRoutes.adminBucketCreate,
         name: 'adminBucketCreate',
-        builder: (context, state) => const BucketUpsertPage(),
+        builder: (context, state) {
+          final extra = state.extra;
+          final createArgs = extra is CreateBucketArgs ? extra : null;
+          return BucketUpsertPage(createArgs: createArgs);
+        },
       ),
       GoRoute(
         parentNavigatorKey: _rootNavKey,
@@ -218,6 +224,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                   name: '',
                   emoji: '🪣',
                   contents: const [],
+                  onSubmit: (_) async {},
                 );
 
           return BucketUpsertPage(editArgs: args);

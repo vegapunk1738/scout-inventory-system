@@ -34,7 +34,7 @@ class Item {
     return Item(
       id: id ?? this.id,
       name: name ?? this.name,
-      bucketBarcode: bucketId ?? this.bucketBarcode,
+      bucketBarcode: bucketId ?? bucketBarcode,
       bucketName: bucketName ?? this.bucketName,
       quantity: quantity ?? this.quantity,
       maxQuantity: maxQuantity ?? this.maxQuantity,

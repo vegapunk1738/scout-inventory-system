@@ -40,9 +40,10 @@ class _BucketManagementAdminPageState
     super.dispose();
   }
 
-  // ── Error helper — mirrors users_page._showError exactly ──────────────
+  // ── Error helper ──────────────────────────────────────────────────────
 
   void _showError(Object e, {required String action}) {
+    if (!mounted) return;
     if (e is ApiException && e.hasFieldErrors) {
       final toast = AppToast.of(context);
       for (final fe in e.fieldErrors) {
@@ -68,40 +69,43 @@ class _BucketManagementAdminPageState
   // ── Create ────────────────────────────────────────────────────────────
 
   Future<void> _openCreateBucket() async {
-    final res = await context.push<Map<String, dynamic>>(
+    // Capture notifier before the async gap.
+    final notifier = ref.read(bucketsProvider.notifier);
+
+    await context.push<void>(
       AppRoutes.adminBucketCreate,
-    );
-    if (!mounted || res == null) return;
+      extra: CreateBucketArgs(
+        onSubmit: (result) async {
+          final name = (result['name'] ?? '').toString();
+          final abbreviation = (result['abbreviation'] ?? '').toString();
+          final contents =
+              (result['contents'] as List?)?.cast<Map<String, dynamic>>() ??
+                  [];
 
-    final name = (res['name'] ?? '').toString();
-    final abbreviation = (res['abbreviation'] ?? '').toString();
-    final contents =
-        (res['contents'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-
-    try {
-      final created = await ref.read(bucketsProvider.notifier).createBucket(
+          final created = await notifier.createBucket(
             name: name,
             abbreviation: abbreviation,
             items: contents,
           );
-      if (!mounted) return;
 
-      final itemCount = created.items.length;
-      final itemLabel = itemCount == 1 ? '1 item' : '$itemCount items';
-
-      AppToast.of(context).show(AppToastData.success(
-        title: '$name created',
-        subtitle: '#${created.barcode}  ·  $itemLabel',
-      ));
-    } catch (e) {
-      if (!mounted) return;
-      _showError(e, action: 'Could not create $name');
-    }
+          if (mounted) {
+            final itemCount = created.items.length;
+            final itemLabel = itemCount == 1 ? '1 item' : '$itemCount items';
+            AppToast.of(context).show(AppToastData.success(
+              title: 'Created: $name',
+              subtitle: '#${created.barcode}  ·  $itemLabel',
+            ));
+          }
+        },
+      ),
+    );
   }
 
   // ── Edit ──────────────────────────────────────────────────────────────
 
   Future<void> _openEditBucket(Bucket bucket) async {
+    final notifier = ref.read(bucketsProvider.notifier);
+
     final seeds = bucket.items
         .map((i) => BucketContentSeed(
               id: i.id,
@@ -117,45 +121,40 @@ class _BucketManagementAdminPageState
       barcode: bucket.barcode,
       name: bucket.name,
       contents: seeds,
+      onSubmit: (result) async {
+        final newName = (result['name'] as String?) ?? bucket.name;
+        final contents =
+            (result['contents'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+
+        final updated = await notifier.updateBucket(
+          bucket.id,
+          name: newName,
+          items: contents,
+        );
+
+        if (mounted) {
+          final changes = <String>[];
+          if (newName != bucket.name) changes.add('${bucket.name} → $newName');
+          if (updated.items.length != bucket.items.length) {
+            changes
+                .add('${bucket.items.length} → ${updated.items.length} items');
+          } else {
+            changes.add('Items updated');
+          }
+
+          final displayName = newName != bucket.name ? newName : bucket.name;
+          AppToast.of(context).show(AppToastData.success(
+            title: 'Updated: $displayName',
+            subtitle: changes.join('  ·  '),
+          ));
+        }
+      },
     );
 
-    final res = await context.push<Map<String, dynamic>>(
+    await context.push<void>(
       AppRoutes.adminBucketEdit(bucket.barcode),
       extra: args,
     );
-
-    if (!mounted || res == null) return;
-
-    final newName = (res['name'] as String?) ?? bucket.name;
-    final contents =
-        (res['contents'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-
-    try {
-      final updated = await ref.read(bucketsProvider.notifier).updateBucket(
-            bucket.id,
-            name: newName,
-            items: contents,
-          );
-      if (!mounted) return;
-
-      // Build descriptive subtitle about what changed.
-      final changes = <String>[];
-      if (newName != bucket.name) changes.add('${bucket.name} → $newName');
-      if (updated.items.length != bucket.items.length) {
-        changes.add('${bucket.items.length} → ${updated.items.length} items');
-      } else {
-        changes.add('Items updated');
-      }
-
-      final displayName = newName != bucket.name ? newName : bucket.name;
-      AppToast.of(context).show(AppToastData.success(
-        title: '$displayName updated',
-        subtitle: changes.join('  ·  '),
-      ));
-    } catch (e) {
-      if (!mounted) return;
-      _showError(e, action: 'Could not update ${bucket.name}');
-    }
   }
 
   // ── Delete ────────────────────────────────────────────────────────────
@@ -196,7 +195,7 @@ class _BucketManagementAdminPageState
       final itemLabel =
           bucket.items.length == 1 ? '1 item' : '${bucket.items.length} items';
       AppToast.of(context).show(AppToastData.success(
-        title: '${bucket.name} removed',
+        title: 'Deleted: ${bucket.name}',
         subtitle: '#${bucket.barcode}  ·  $itemLabel cleared',
       ));
     } catch (e) {
@@ -297,7 +296,6 @@ class _BucketManagementAdminPageState
 
     final bucketsAsync = ref.watch(bucketsProvider);
 
-    // Match AdminShell bottom nav footprint
     const navHeight = 78.0;
     const navPad = 12.0;
     final bottomFootprint = safeBottom + navHeight + navPad + 10;
@@ -313,7 +311,8 @@ class _BucketManagementAdminPageState
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.error_outline, size: 48, color: AppColors.muted),
+                  const Icon(Icons.error_outline,
+                      size: 48, color: AppColors.muted),
                   const SizedBox(height: 12),
                   Text('Failed to load buckets', style: t.titleMedium),
                   const SizedBox(height: 4),
@@ -334,8 +333,8 @@ class _BucketManagementAdminPageState
                   : allBuckets.where((b) {
                       if (b.name.toLowerCase().contains(q)) return true;
                       if (b.barcode.toLowerCase().contains(q)) return true;
-                      if (b.items.any(
-                          (i) => i.name.toLowerCase().contains(q))) {
+                      if (b.items
+                          .any((i) => i.name.toLowerCase().contains(q))) {
                         return true;
                       }
                       return false;
@@ -350,12 +349,11 @@ class _BucketManagementAdminPageState
                   slivers: [
                     SliverToBoxAdapter(
                       child: Padding(
-                        padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
+                        padding:
+                            EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
                         child: _ManageHeader(onAdd: _openCreateBucket),
                       ),
                     ),
-
-                    // Sticky search
                     SliverPersistentHeader(
                       pinned: true,
                       delegate: _StickyHeaderDelegate(
@@ -370,7 +368,6 @@ class _BucketManagementAdminPageState
                         ),
                       ),
                     ),
-
                     SliverToBoxAdapter(
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
@@ -394,7 +391,6 @@ class _BucketManagementAdminPageState
                         ),
                       ),
                     ),
-
                     if (isEmpty)
                       SliverFillRemaining(
                         hasScrollBody: false,
@@ -428,7 +424,6 @@ class _BucketManagementAdminPageState
                           }, childCount: items.length),
                         ),
                       ),
-
                     SliverToBoxAdapter(
                         child: SizedBox(height: bottomFootprint)),
                   ],
@@ -637,7 +632,8 @@ class _BucketCard extends StatelessWidget {
               child: Row(
                 children: [
                   Expanded(
-                    child: _CardActionButton(label: 'Edit', onPressed: onEdit),
+                    child:
+                        _CardActionButton(label: 'Edit', onPressed: onEdit),
                   ),
                   const SizedBox(width: 10),
                   Expanded(

@@ -1,21 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:scout_stock/data/api/api_client.dart';
 import 'package:scout_stock/domain/models/managed_user.dart'
     show kSuperAdminScoutId;
+import 'package:scout_stock/presentation/widgets/app_toast.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
 import '../../widgets/attention_text_field_widget.dart';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Callback type used by both create and edit flows.
+//
+// The upsert page calls this *before* popping, so the API request is
+// guaranteed to fire regardless of the parent page's lifecycle state.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Async callback that performs the actual API mutation.
+/// Throws on failure so the upsert page can surface the error and let the
+/// user retry without losing their input.
+typedef UpsertSubmitCallback =
+    Future<void> Function(Map<String, dynamic> result);
+
 /// Navigation args for editing an existing user.
-/// For create mode, push the route with no extra or with a [CreateUserArgs].
 class UserUpsertArgs {
   const UserUpsertArgs({
     required this.scoutId,
     required this.displayName,
     required this.role,
+    required this.onSubmit,
   });
 
   final String scoutId;
@@ -23,14 +38,21 @@ class UserUpsertArgs {
 
   /// 'scout' | 'admin'
   final String role;
+
+  /// Called with the form payload. Must complete the API call before
+  /// returning. Throw to signal failure.
+  final UpsertSubmitCallback onSubmit;
 }
 
 /// Passed as extra when navigating to the create page.
 class CreateUserArgs {
-  const CreateUserArgs({required this.nextScoutId});
+  const CreateUserArgs({required this.nextScoutId, required this.onSubmit});
 
-  /// The next available scout_id fetched from the backend.
   final String nextScoutId;
+
+  /// Called with the form payload. Must complete the API call before
+  /// returning. Throw to signal failure.
+  final UpsertSubmitCallback onSubmit;
 }
 
 enum _UserRole { scout, admin }
@@ -103,7 +125,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
       _idCtrl.text = widget.createArgs!.nextScoutId;
     }
 
-    // Live validation — clear errors as the user types.
     _nameCtrl.addListener(_validateNameLive);
     _passwordCtrl.addListener(_validatePasswordLive);
     _newPasswordCtrl.addListener(_validateNewPasswordLive);
@@ -144,7 +165,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
     if (_newPwError != null && _newPasswordCtrl.text.length >= 6) {
       setState(() => _newPwError = null);
     }
-    // Also clear confirm error if they now match.
     if (_confirmPwError != null &&
         _confirmPasswordCtrl.text == _newPasswordCtrl.text) {
       setState(() => _confirmPwError = null);
@@ -160,8 +180,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
 
   // ── Full validation on submit ──────────────────────────────────────────
 
-  /// Returns true if all fields are valid. Sets error strings and shakes
-  /// the first invalid field.
   bool _validate() {
     String? nameErr;
     String? idErr;
@@ -172,7 +190,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
     final name = _nameCtrl.text.trim();
     final id = _idCtrl.text.trim();
 
-    // Name: 2–100 chars
     if (name.isEmpty) {
       nameErr = 'Name is required';
     } else if (name.length < 2) {
@@ -181,7 +198,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
       nameErr = 'Must be at most 100 characters';
     }
 
-    // Scout ID: digits only, 1–10 chars
     if (!_isEdit) {
       if (id.isEmpty) {
         idErr = 'Scout ID is required';
@@ -192,7 +208,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
       }
     }
 
-    // Password (create mode): 6–128 chars
     if (!_isEdit) {
       final pw = _passwordCtrl.text;
       if (pw.isEmpty) {
@@ -204,7 +219,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
       }
     }
 
-    // Password (edit mode): optional, but if entered must be 6+ chars
     if (_isEdit) {
       final newPw = _newPasswordCtrl.text;
       final confirm = _confirmPasswordCtrl.text;
@@ -231,7 +245,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
       _confirmPwError = confirmPwErr;
     });
 
-    // Shake + focus the first invalid field.
     if (nameErr != null) {
       _nameFocus.requestFocus();
       _nameKey.currentState?.triggerInvalid();
@@ -258,6 +271,39 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
     return true;
   }
 
+  // ── Error display ──────────────────────────────────────────────────────
+
+  /// Shows API errors on this page so the user can see what went wrong
+  /// and retry without losing their input.
+  void _showSubmitError(Object e) {
+    if (!mounted) return;
+
+    if (e is ApiException && e.hasFieldErrors) {
+      final toast = AppToast.of(context);
+      for (final fe in e.fieldErrors) {
+        toast.show(
+          AppToastData.error(
+            title: fe.label,
+            subtitle: fe.message,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+      return;
+    }
+
+    final msg = e is ApiException
+        ? e.message
+        : 'Something went wrong. Please try again.';
+    AppToast.of(context).show(
+      AppToastData.error(
+        title: _isEdit ? 'Update failed' : 'Creation failed',
+        subtitle: msg,
+        duration: const Duration(seconds: 5),
+      ),
+    );
+  }
+
   // ── Submit ─────────────────────────────────────────────────────────────
 
   Future<void> _submit() async {
@@ -268,29 +314,55 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
     final scoutId = _idCtrl.text.trim();
 
     setState(() => _saving = true);
-    FocusScope.of(context).unfocus();
 
-    if (!_isEdit) {
-      context.pop<Map<String, dynamic>>({
-        'displayName': name,
-        'scoutId': scoutId,
-        'role': _role.apiValue,
-        'password': _passwordCtrl.text,
-      });
-      return;
+    // FIX: Unfocus *after* setting saving state, and wrap everything in
+    // try/finally so _saving is always reset on failure.
+    try {
+      FocusScope.of(context).unfocus();
+
+      // Build the result payload.
+      final Map<String, dynamic> payload;
+      if (!_isEdit) {
+        payload = {
+          'displayName': name,
+          'scoutId': scoutId,
+          'role': _role.apiValue,
+          'password': _passwordCtrl.text,
+        };
+      } else {
+        final newPw = _newPasswordCtrl.text;
+        final confirm = _confirmPasswordCtrl.text;
+        final wantsPwChange = newPw.isNotEmpty && confirm.isNotEmpty;
+        payload = {
+          'displayName': name,
+          'scoutId': scoutId,
+          'role': _role.apiValue,
+          if (wantsPwChange) 'newPassword': newPw,
+        };
+      }
+
+      // FIX: Call the mutation callback *here*, while we're still mounted
+      // and have a valid context. The callback performs the API call.
+      // Only pop on success — on failure the user stays on the form.
+      final callback = _isEdit
+          ? widget.editArgs!.onSubmit
+          : widget.createArgs!.onSubmit;
+      await callback(payload);
+
+      // API call succeeded — now pop.
+      if (mounted) context.pop();
+    } catch (e) {
+      // FIX: Surface the error on this page so the user can see it and
+      // retry. The old code would have silently swallowed this because
+      // the error was only catchable on the parent page — which might
+      // already be unmounted.
+      _showSubmitError(e);
+    } finally {
+      // FIX: Always reset _saving so the button is never permanently
+      // disabled. Without this, a failed API call or a pop() that
+      // doesn't navigate would leave the form in a dead state.
+      if (mounted) setState(() => _saving = false);
     }
-
-    // Edit payload.
-    final newPw = _newPasswordCtrl.text;
-    final confirm = _confirmPasswordCtrl.text;
-    final wantsPwChange = newPw.isNotEmpty && confirm.isNotEmpty;
-
-    context.pop<Map<String, dynamic>>({
-      'displayName': name,
-      'scoutId': scoutId,
-      'role': _role.apiValue,
-      if (wantsPwChange) 'newPassword': newPw,
-    });
   }
 
   // ── Styles ─────────────────────────────────────────────────────────────
@@ -326,8 +398,8 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
     final subtitle = _isSuperAdmin
         ? 'This is the Super Admin account. It cannot be modified.'
         : _isEdit
-            ? 'Update the details for this team member.'
-            : 'Fill in the details to add a new team member.';
+        ? 'Update the details for this team member.'
+        : 'Fill in the details to add a new team member.';
 
     final hintStyle = t.bodyMedium?.copyWith(color: AppColors.muted);
     final errorStyle = t.bodyMedium?.copyWith(
@@ -365,7 +437,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                   ),
                 ),
 
-                // ── Super Admin banner ─────────────────────────────────
                 if (_isSuperAdmin) ...[
                   const SizedBox(height: 20),
                   Container(
@@ -377,8 +448,10 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.lock_rounded,
-                            color: Color(0xFF8B6914)),
+                        const Icon(
+                          Icons.lock_rounded,
+                          color: Color(0xFF8B6914),
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
@@ -396,7 +469,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
 
                 const SizedBox(height: 28),
 
-                // ── Role ───────────────────────────────────────────────
                 Text('Role Selection', style: t.titleMedium),
                 const SizedBox(height: 12),
                 IgnorePointer(
@@ -417,7 +489,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                 ),
                 const SizedBox(height: 26),
 
-                // ── Full Name ──────────────────────────────────────────
                 Text('Full Name', style: t.titleMedium),
                 const SizedBox(height: 10),
                 AttentionTextField(
@@ -441,8 +512,10 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                   ),
                   textStyle: _fieldTextStyle(context),
                   hintStyle: _hintStyle(context),
-                  suffixIcon: const Icon(Icons.person_rounded,
-                      color: AppColors.muted),
+                  suffixIcon: const Icon(
+                    Icons.person_rounded,
+                    color: AppColors.muted,
+                  ),
                   onSubmitted: (_) {
                     if (!_isEdit) {
                       _idFocus.requestFocus();
@@ -459,7 +532,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
 
                 const SizedBox(height: 18),
 
-                // ── Scout ID ───────────────────────────────────────────
                 Text('Scout ID', style: t.titleMedium),
                 const SizedBox(height: 10),
                 AttentionTextField(
@@ -471,8 +543,9 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                   textAlign: TextAlign.start,
                   textCapitalization: TextCapitalization.none,
                   keyboardType: TextInputType.number,
-                  textInputAction:
-                      _isEdit ? TextInputAction.done : TextInputAction.next,
+                  textInputAction: _isEdit
+                      ? TextInputAction.done
+                      : TextInputAction.next,
                   allowPattern: r'[0-9]',
                   uppercase: false,
                   maxLength: 10,
@@ -483,8 +556,10 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                   ),
                   textStyle: _fieldTextStyle(context),
                   hintStyle: _hintStyle(context),
-                  suffixIcon: const Icon(Icons.badge_rounded,
-                      color: AppColors.muted),
+                  suffixIcon: const Icon(
+                    Icons.badge_rounded,
+                    color: AppColors.muted,
+                  ),
                   onSubmitted: (_) {
                     if (_isEdit) _submit();
                   },
@@ -500,10 +575,8 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
 
                 const SizedBox(height: 24),
 
-                // ── Password (create / edit) ───────────────────────────
                 if (!_isSuperAdmin) ...[
                   if (!_isEdit) ...[
-                    // ── Create mode: single password field ─────────────
                     Text('Password', style: t.titleMedium),
                     const SizedBox(height: 10),
                     AttentionTextField(
@@ -544,7 +617,6 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                       style: _pwError != null ? errorStyle : hintStyle,
                     ),
                   ] else ...[
-                    // ── Edit mode: new + confirm password ──────────────
                     Text('New Password', style: t.titleMedium),
                     const SizedBox(height: 10),
                     AttentionTextField(
@@ -581,7 +653,8 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      _newPwError ?? 'At least 6 characters. Leave blank to keep current password.',
+                      _newPwError ??
+                          'At least 6 characters. Leave blank to keep current password.',
                       style: _newPwError != null ? errorStyle : hintStyle,
                     ),
 
@@ -610,7 +683,8 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
                       hintStyle: _hintStyle(context),
                       suffixIcon: IconButton(
                         onPressed: () => setState(
-                            () => _confirmPwObscure = !_confirmPwObscure),
+                          () => _confirmPwObscure = !_confirmPwObscure,
+                        ),
                         icon: Icon(
                           _confirmPwObscure
                               ? Icons.visibility_rounded
@@ -669,8 +743,7 @@ class _RoleSegmented extends StatelessWidget {
     Widget option(_UserRole role) {
       final selected = value == role;
 
-      final bg =
-          selected ? Colors.white : Colors.white.withValues(alpha: 0);
+      final bg = selected ? Colors.white : Colors.white.withValues(alpha: 0);
 
       final shadow = tokens.cardShadow
           .map(
