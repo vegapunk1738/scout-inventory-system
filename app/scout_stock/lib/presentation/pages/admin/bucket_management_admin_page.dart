@@ -14,6 +14,46 @@ import 'package:scout_stock/theme/app_theme.dart';
 import 'package:scout_stock/router/app_routes.dart';
 import 'package:scout_stock/presentation/pages/admin/bucket_upsert_page.dart';
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/// Formats a UTC ISO string to local "Mar 14, 2026 · 11:20 PM".
+String _formatCreatedAt(String isoString) {
+  final dt = DateTime.parse(isoString).toLocal();
+
+  const months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+
+  final month = months[dt.month - 1];
+  final day = dt.day;
+  final year = dt.year;
+
+  final hour = dt.hour;
+  final minute = dt.minute.toString().padLeft(2, '0');
+  final period = hour >= 12 ? 'PM' : 'AM';
+  final h12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+
+  return '$month $day, $year · $h12:$minute $period';
+}
+
+String _formatRelative(DateTime dt) {
+  final now = DateTime.now();
+  final d = now.difference(dt);
+
+  if (d.inMinutes < 1) return 'just now';
+  if (d.inMinutes < 60) return '${d.inMinutes}m ago';
+  if (d.inHours < 24) return '${d.inHours}h ago';
+  if (d.inDays < 7) return '${d.inDays}d ago';
+
+  final weeks = (d.inDays / 7).floor();
+  if (weeks < 5) return '${weeks}w ago';
+
+  return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+}
+
+// ─── Page ───────────────────────────────────────────────────────────────────
+
 class BucketManagementAdminPage extends ConsumerStatefulWidget {
   const BucketManagementAdminPage({super.key});
 
@@ -40,8 +80,6 @@ class _BucketManagementAdminPageState
     super.dispose();
   }
 
-  // ── Error helper ──────────────────────────────────────────────────────
-
   void _showError(Object e, {required String action}) {
     if (!mounted) return;
     if (e is ApiException && e.hasFieldErrors) {
@@ -66,10 +104,7 @@ class _BucketManagementAdminPageState
     ));
   }
 
-  // ── Create ────────────────────────────────────────────────────────────
-
   Future<void> _openCreateBucket() async {
-    // Capture notifier before the async gap.
     final notifier = ref.read(bucketsProvider.notifier);
 
     await context.push<void>(
@@ -100,8 +135,6 @@ class _BucketManagementAdminPageState
       ),
     );
   }
-
-  // ── Edit ──────────────────────────────────────────────────────────────
 
   Future<void> _openEditBucket(Bucket bucket) async {
     final notifier = ref.read(bucketsProvider.notifier);
@@ -157,8 +190,6 @@ class _BucketManagementAdminPageState
     );
   }
 
-  // ── Delete ────────────────────────────────────────────────────────────
-
   Future<void> _confirmDelete(Bucket bucket) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -203,8 +234,6 @@ class _BucketManagementAdminPageState
       _showError(e, action: 'Could not delete ${bucket.name}');
     }
   }
-
-  // ── Print ─────────────────────────────────────────────────────────────
 
   Future<void> _printBucketLabel(Bucket bucket) async {
     if (_printing) return;
@@ -284,8 +313,6 @@ class _BucketManagementAdminPageState
     }
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
@@ -311,13 +338,11 @@ class _BucketManagementAdminPageState
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.error_outline,
-                      size: 48, color: AppColors.muted),
+                  const Icon(Icons.error_outline, size: 48, color: AppColors.muted),
                   const SizedBox(height: 12),
                   Text('Failed to load buckets', style: t.titleMedium),
                   const SizedBox(height: 4),
-                  Text('$err',
-                      style: t.bodySmall?.copyWith(color: AppColors.muted)),
+                  Text('$err', style: t.bodySmall?.copyWith(color: AppColors.muted)),
                   const SizedBox(height: 16),
                   FilledButton(
                     onPressed: () => ref.invalidate(bucketsProvider),
@@ -333,10 +358,7 @@ class _BucketManagementAdminPageState
                   : allBuckets.where((b) {
                       if (b.name.toLowerCase().contains(q)) return true;
                       if (b.barcode.toLowerCase().contains(q)) return true;
-                      if (b.items
-                          .any((i) => i.name.toLowerCase().contains(q))) {
-                        return true;
-                      }
+                      if (b.items.any((i) => i.name.toLowerCase().contains(q))) return true;
                       return false;
                     }).toList(growable: false);
 
@@ -349,8 +371,7 @@ class _BucketManagementAdminPageState
                   slivers: [
                     SliverToBoxAdapter(
                       child: Padding(
-                        padding:
-                            EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
+                        padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
                         child: _ManageHeader(onAdd: _openCreateBucket),
                       ),
                     ),
@@ -373,20 +394,8 @@ class _BucketManagementAdminPageState
                         padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                         child: Row(
                           children: [
-                            Expanded(
-                              child: Text(
-                                'ALL BUCKETS',
-                                style: t.labelMedium?.copyWith(
-                                  color: AppColors.muted,
-                                ),
-                              ),
-                            ),
-                            Text(
-                              'STATUS',
-                              style: t.labelMedium?.copyWith(
-                                color: AppColors.muted,
-                              ),
-                            ),
+                            Expanded(child: Text('ALL BUCKETS', style: t.labelMedium?.copyWith(color: AppColors.muted))),
+                            Text('STATUS', style: t.labelMedium?.copyWith(color: AppColors.muted)),
                           ],
                         ),
                       ),
@@ -398,16 +407,14 @@ class _BucketManagementAdminPageState
                           query: q,
                           emojiBase: emojiBase.copyWith(fontSize: 54),
                           titleStyle: t.titleLarge,
-                          bodyStyle:
-                              t.bodyLarge?.copyWith(color: AppColors.muted),
+                          bodyStyle: t.bodyLarge?.copyWith(color: AppColors.muted),
                         ),
                       )
                     else
                       SliverPadding(
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                         sliver: SliverList(
-                          delegate:
-                              SliverChildBuilderDelegate((context, index) {
+                          delegate: SliverChildBuilderDelegate((context, index) {
                             final b = items[index];
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 12),
@@ -424,15 +431,13 @@ class _BucketManagementAdminPageState
                           }, childCount: items.length),
                         ),
                       ),
-                    SliverToBoxAdapter(
-                        child: SizedBox(height: bottomFootprint)),
+                    SliverToBoxAdapter(child: SizedBox(height: bottomFootprint)),
                   ],
                 ),
               );
             },
           ),
 
-          // Print overlay
           if (_printing)
             Positioned.fill(
               child: IgnorePointer(
@@ -441,32 +446,19 @@ class _BucketManagementAdminPageState
                   color: Colors.black.withValues(alpha: 0.05),
                   alignment: Alignment.center,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius:
-                          BorderRadius.circular(tokens.radiusLg),
+                      borderRadius: BorderRadius.circular(tokens.radiusLg),
                       boxShadow: tokens.cardShadow,
                       border: Border.all(color: AppColors.outline),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child:
-                              CircularProgressIndicator(strokeWidth: 2.4),
-                        ),
+                        const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4)),
                         const SizedBox(width: 10),
-                        Text(
-                          'Preparing label…',
-                          style: t.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w800),
-                        ),
+                        Text('Preparing label…', style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                       ],
                     ),
                   ),
@@ -491,7 +483,6 @@ class _ManageHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
-
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -501,36 +492,20 @@ class _ManageHeader extends StatelessWidget {
             children: [
               Text('Bucket Management', style: t.titleLarge),
               const SizedBox(height: 4),
-              Text(
-                'ADMIN VIEW',
-                style: t.labelMedium?.copyWith(
-                  color: AppColors.primary,
-                  letterSpacing: 1.8,
-                ),
-              ),
+              Text('ADMIN VIEW', style: t.labelMedium?.copyWith(color: AppColors.primary, letterSpacing: 1.8)),
             ],
           ),
         ),
         const SizedBox(width: 10),
         DecoratedBox(
-          decoration: BoxDecoration(
-            color: AppColors.primary,
-            shape: BoxShape.circle,
-            boxShadow: tokens.glowShadow,
-          ),
+          decoration: BoxDecoration(color: AppColors.primary, shape: BoxShape.circle, boxShadow: tokens.glowShadow),
           child: SizedBox(
-            width: 42,
-            height: 42,
+            width: 42, height: 42,
             child: IconButton(
               onPressed: onAdd,
               icon: const Icon(Icons.add_rounded, color: Colors.white),
-              splashRadius: 28,
-              tooltip: 'New bucket',
-              style: IconButton.styleFrom(
-                splashFactory: NoSplash.splashFactory,
-                hoverColor: Colors.transparent,
-                highlightColor: Colors.transparent,
-              ),
+              splashRadius: 28, tooltip: 'New bucket',
+              style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory, hoverColor: Colors.transparent, highlightColor: Colors.transparent),
             ),
           ),
         ),
@@ -550,32 +525,21 @@ class _BucketCard extends StatelessWidget {
 
   final Bucket bucket;
   final double radiusXl;
-  final VoidCallback onEdit;
-  final VoidCallback onPrint;
-  final VoidCallback onDelete;
+  final VoidCallback onEdit, onPrint, onDelete;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
 
-    final timeText = _formatRelative(DateTime.parse(bucket.createdAt));
+    final nameStyle = t.titleMedium?.copyWith(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.ink);
+    final idStyle = t.bodyMedium?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w700);
+    final metaStyle = t.bodyMedium?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w700);
 
-    final nameStyle = t.titleMedium?.copyWith(
-      fontSize: 18,
-      fontWeight: FontWeight.w800,
-      color: AppColors.ink,
-    );
+    final labelStyle = t.bodySmall?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w600, fontSize: 10.5, height: 1.2);
+    final valueStyle = t.bodySmall?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w700, fontSize: 11, height: 1.2);
 
-    final idStyle = t.bodyMedium?.copyWith(
-      color: AppColors.muted,
-      fontWeight: FontWeight.w700,
-    );
-
-    final metaStyle = t.bodyMedium?.copyWith(
-      color: AppColors.muted,
-      fontWeight: FontWeight.w700,
-    );
+    final createdAtFormatted = _formatCreatedAt(bucket.createdAt);
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -592,36 +556,55 @@ class _BucketCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
               child: Column(
                 children: [
+                  // Name + stock pill
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Text(
-                          bucket.name,
-                          style: nameStyle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
+                      Expanded(child: Text(bucket.name, style: nameStyle, maxLines: 1, overflow: TextOverflow.ellipsis)),
                       const SizedBox(width: 10),
                       _StockPill(state: bucket.stockState),
                     ],
                   ),
                   const SizedBox(height: 6),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('#${bucket.barcode}', style: idStyle),
-                  ),
+
+                  // Barcode
+                  Align(alignment: Alignment.centerLeft, child: Text('#${bucket.barcode}', style: idStyle)),
                   const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Text(
-                        '${bucket.items.length} Items',
-                        style: metaStyle,
-                      ),
-                      const Spacer(),
-                      Text(timeText, style: metaStyle),
-                    ],
+
+                  // Created by + created at row
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.background,
+                      borderRadius: BorderRadius.circular(tokens.radiusLg),
+                      border: Border.all(color: AppColors.outline),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Created by', style: labelStyle),
+                              const SizedBox(height: 2),
+                              Text(bucket.createdByName, style: valueStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text('Created at', style: labelStyle),
+                              const SizedBox(height: 2),
+                              Text(createdAtFormatted, style: valueStyle, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.right),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -631,25 +614,11 @@ class _BucketCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
               child: Row(
                 children: [
-                  Expanded(
-                    child:
-                        _CardActionButton(label: 'Edit', onPressed: onEdit),
-                  ),
+                  Expanded(child: _CardActionButton(label: 'Edit', onPressed: onEdit)),
                   const SizedBox(width: 10),
-                  Expanded(
-                    child: _CardActionButton(
-                      label: 'Print Label',
-                      onPressed: onPrint,
-                    ),
-                  ),
+                  Expanded(child: _CardActionButton(label: 'Print Label', onPressed: onPrint)),
                   const SizedBox(width: 10),
-                  Expanded(
-                    child: _CardActionButton(
-                      label: 'Delete',
-                      onPressed: onDelete,
-                      variant: _CardActionVariant.danger,
-                    ),
-                  ),
+                  Expanded(child: _CardActionButton(label: 'Delete', onPressed: onDelete, variant: _CardActionVariant.danger)),
                 ],
               ),
             ),
@@ -663,12 +632,7 @@ class _BucketCard extends StatelessWidget {
 enum _CardActionVariant { neutral, danger }
 
 class _CardActionButton extends StatelessWidget {
-  const _CardActionButton({
-    required this.label,
-    required this.onPressed,
-    this.variant = _CardActionVariant.neutral,
-  });
-
+  const _CardActionButton({required this.label, required this.onPressed, this.variant = _CardActionVariant.neutral});
   final String label;
   final VoidCallback onPressed;
   final _CardActionVariant variant;
@@ -677,34 +641,15 @@ class _CardActionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
-
-    final bg = variant == _CardActionVariant.danger
-        ? const Color(0xFFFEE4E2)
-        : const Color(0xFFF2F4F7);
-
-    final fg = variant == _CardActionVariant.danger
-        ? const Color(0xFFD92D20)
-        : const Color(0xFF475467);
-
+    final bg = variant == _CardActionVariant.danger ? const Color(0xFFFEE4E2) : const Color(0xFFF2F4F7);
+    final fg = variant == _CardActionVariant.danger ? const Color(0xFFD92D20) : const Color(0xFF475467);
     return Material(
       color: bg,
       borderRadius: BorderRadius.circular(tokens.radiusLg),
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(tokens.radiusLg),
-        child: SizedBox(
-          height: 46,
-          child: Center(
-            child: Text(
-              label,
-              style: t.titleMedium?.copyWith(
-                fontSize: 14,
-                fontWeight: FontWeight.w800,
-                color: fg,
-              ),
-            ),
-          ),
-        ),
+        child: SizedBox(height: 46, child: Center(child: Text(label, style: t.titleMedium?.copyWith(fontSize: 14, fontWeight: FontWeight.w800, color: fg)))),
       ),
     );
   }
@@ -712,65 +657,31 @@ class _CardActionButton extends StatelessWidget {
 
 class _StockPill extends StatelessWidget {
   const _StockPill({required this.state});
-
   final BucketStockState state;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-
-    late final Color bg;
-    late final Color border;
-    late final Color fg;
+    late final Color bg, border, fg;
     late final String text;
-
     switch (state) {
       case BucketStockState.fullyStocked:
-        bg = AppColors.successBg;
-        border = const Color(0xFFB7E4C7);
-        fg = AppColors.primary;
-        text = 'In Stock';
-        break;
+        bg = AppColors.successBg; border = const Color(0xFFB7E4C7); fg = AppColors.primary; text = 'In Stock';
       case BucketStockState.inUse:
-        bg = AppColors.warningBg;
-        border = const Color(0xFFFBD38D);
-        fg = const Color(0xFF8A5B00);
-        text = 'In Use';
-        break;
+        bg = AppColors.warningBg; border = const Color(0xFFFBD38D); fg = const Color(0xFF8A5B00); text = 'In Use';
       case BucketStockState.outOfStock:
-        bg = const Color(0xFFFFE8E8);
-        border = const Color(0xFFFECACA);
-        fg = const Color(0xFFB42318);
-        text = 'Out of Stock';
-        break;
+        bg = const Color(0xFFFFE8E8); border = const Color(0xFFFECACA); fg = const Color(0xFFB42318); text = 'Out of Stock';
     }
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: bg,
-        border: Border.all(color: border),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: t.bodyMedium?.copyWith(
-          color: fg,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.2,
-        ),
-      ),
+      decoration: BoxDecoration(color: bg, border: Border.all(color: border), borderRadius: BorderRadius.circular(999)),
+      child: Text(text, style: t.bodyMedium?.copyWith(color: fg, fontWeight: FontWeight.w800, letterSpacing: 0.2)),
     );
   }
 }
 
 class _SearchCard extends StatelessWidget {
-  const _SearchCard({
-    required this.controller,
-    required this.onChanged,
-    required this.hintText,
-  });
-
+  const _SearchCard({required this.controller, required this.onChanged, required this.hintText});
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
   final String hintText;
@@ -779,20 +690,11 @@ class _SearchCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
-
     return Theme(
-      data: Theme.of(context).copyWith(
-        hoverColor: Colors.transparent,
-        splashColor: Colors.transparent,
-        highlightColor: Colors.transparent,
-      ),
+      data: Theme.of(context).copyWith(hoverColor: Colors.transparent, splashColor: Colors.transparent, highlightColor: Colors.transparent),
       child: Container(
         height: 56,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(tokens.radiusLg),
-          boxShadow: tokens.cardShadow,
-        ),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(tokens.radiusLg), boxShadow: tokens.cardShadow),
         child: Row(
           children: [
             const SizedBox(width: 16),
@@ -800,24 +702,12 @@ class _SearchCard extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: TextField(
-                controller: controller,
-                onChanged: onChanged,
-                textInputAction: TextInputAction.search,
-                style: t.bodyLarge?.copyWith(
-                  color: AppColors.ink,
-                  fontWeight: FontWeight.w600,
-                ),
+                controller: controller, onChanged: onChanged, textInputAction: TextInputAction.search,
+                style: t.bodyLarge?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w600),
                 decoration: InputDecoration(
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.only(right: 16),
-                  hintText: hintText,
-                  hintStyle: t.bodyLarge?.copyWith(
-                    color: const Color(0xFFB9C0CC),
-                    fontWeight: FontWeight.w600,
-                  ),
+                  border: InputBorder.none, enabledBorder: InputBorder.none, focusedBorder: InputBorder.none, isDense: true,
+                  contentPadding: const EdgeInsets.only(right: 16), hintText: hintText,
+                  hintStyle: t.bodyLarge?.copyWith(color: const Color(0xFFB9C0CC), fontWeight: FontWeight.w600),
                 ),
               ),
             ),
@@ -832,74 +722,34 @@ class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   _StickyHeaderDelegate({required this.height, required this.child});
   final double height;
   final Widget child;
-
-  @override
-  double get minExtent => height;
-  @override
-  double get maxExtent => height;
-
-  @override
-  Widget build(
-      BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return child;
-  }
-
-  @override
-  bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) {
-    return oldDelegate.height != height || oldDelegate.child != child;
-  }
+  @override double get minExtent => height;
+  @override double get maxExtent => height;
+  @override Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) => child;
+  @override bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) => oldDelegate.height != height || oldDelegate.child != child;
 }
 
 class _EmptyBucketsState extends StatelessWidget {
-  const _EmptyBucketsState({
-    required this.query,
-    required this.emojiBase,
-    required this.titleStyle,
-    required this.bodyStyle,
-  });
-
+  const _EmptyBucketsState({required this.query, required this.emojiBase, required this.titleStyle, required this.bodyStyle});
   final String query;
   final TextStyle emojiBase;
-  final TextStyle? titleStyle;
-  final TextStyle? bodyStyle;
+  final TextStyle? titleStyle, bodyStyle;
 
   @override
   Widget build(BuildContext context) {
     final title = query.isEmpty ? 'No buckets yet' : 'No buckets found';
-    final subtitle = query.isEmpty
-        ? 'Create your first bucket to start tracking inventory'
-        : 'Try a different keyword';
+    final subtitle = query.isEmpty ? 'Create your first bucket to start tracking inventory' : 'Try a different keyword';
     final emoji = query.isEmpty ? '🪣' : '🔎';
-
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(emoji, style: emojiBase),
-            const SizedBox(height: 10),
-            Text(title, style: titleStyle, textAlign: TextAlign.center),
-            const SizedBox(height: 8),
-            Text(subtitle, style: bodyStyle, textAlign: TextAlign.center),
-          ],
-        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(emoji, style: emojiBase),
+          const SizedBox(height: 10),
+          Text(title, style: titleStyle, textAlign: TextAlign.center),
+          const SizedBox(height: 8),
+          Text(subtitle, style: bodyStyle, textAlign: TextAlign.center),
+        ]),
       ),
     );
   }
-}
-
-String _formatRelative(DateTime dt) {
-  final now = DateTime.now();
-  final d = now.difference(dt);
-
-  if (d.inMinutes < 1) return 'just now';
-  if (d.inMinutes < 60) return '${d.inMinutes}m ago';
-  if (d.inHours < 24) return '${d.inHours}h ago';
-  if (d.inDays < 7) return '${d.inDays}d ago';
-
-  final weeks = (d.inDays / 7).floor();
-  if (weeks < 5) return '${weeks}w ago';
-
-  return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
 }

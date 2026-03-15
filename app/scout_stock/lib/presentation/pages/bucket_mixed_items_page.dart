@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'package:scout_stock/domain/models/item.dart';
 import 'package:scout_stock/router/app_routes.dart';
@@ -27,18 +28,16 @@ class BucketCatalogItem {
 class BucketMixedItemsPage extends ConsumerStatefulWidget {
   const BucketMixedItemsPage({
     super.key,
+    required this.bucketId,
     required this.bucketBarcode,
     required this.bucketName,
     required this.items,
-    this.cartTabIndex = 1,
   });
 
+  final String bucketId;
   final String bucketBarcode;
   final String bucketName;
   final List<BucketCatalogItem> items;
-
-  /// Kept for compatibility (legacy shell). Not used for go_router navigation.
-  final int cartTabIndex;
 
   @override
   ConsumerState<BucketMixedItemsPage> createState() =>
@@ -93,12 +92,6 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
     context.go(AppRoutes.scan);
   }
 
-  void _openCart(BuildContext context) {
-    // Always URL-route (web-friendly). Admins will be redirected to /a/cart.
-    // Using `go` mirrors the old behavior of "leave bucket, show cart".
-    context.go(AppRoutes.cart);
-  }
-
   void _applyDelta({
     required BucketCatalogItem cat,
     required int currentQty,
@@ -118,6 +111,7 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
       cart.addItem(
         Item(
           id: cat.id,
+          bucketId: widget.bucketId,
           name: cat.name,
           emoji: cat.emoji,
           bucketBarcode: widget.bucketBarcode,
@@ -148,6 +142,7 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final t = Theme.of(context).textTheme;
+    final emojiBase = GoogleFonts.notoColorEmoji(height: 1);
 
     final mediaTop = MediaQuery.of(context).padding.top;
     final safeBottom = MediaQuery.of(context).padding.bottom;
@@ -155,13 +150,7 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
     final w = MediaQuery.sizeOf(context).width;
     final compact = w < 380;
 
-    // Narrow rebuilds to items only (good for older phones).
     final cartItems = ref.watch(cartProvider.select((c) => c.items));
-
-    final totalCartCount = cartItems.fold<int>(
-      0,
-      (sum, it) => sum + it.quantity,
-    );
 
     final addedCount = _addedFromThisPage(cartItems);
     final showCta = addedCount > 0;
@@ -205,13 +194,11 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
                     SliverToBoxAdapter(
                       child: Padding(
                         padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
-                        child: BucketMixedHeader(
+                        child: _BucketMixedHeader(
                           bucketBarcode: widget.bucketBarcode,
                           bucketName: widget.bucketName,
                           itemTypesCount: widget.items.length,
-                          cartCount: totalCartCount,
                           onBack: () => _onBack(context),
-                          onCart: () => _openCart(context),
                         ),
                       ),
                     ),
@@ -266,6 +253,7 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
                                   compact: compact,
                                   tokens: tokens,
                                   textTheme: t,
+                                  emojiBase: emojiBase,
                                   onDelta: (d) => _applyDelta(
                                     cat: cat,
                                     currentQty: qty,
@@ -307,11 +295,11 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
                   Align(
                     alignment: Alignment.bottomCenter,
                     child: GlowingActionButton(
-                      label: 'ADD TO CART ($addedCount)',
-                      icon: const Icon(Icons.shopping_cart_rounded),
+                      label: '$addedCount added — tap back when done',
+                      icon: const Icon(Icons.check_rounded),
                       height: ctaHeight,
                       padding: ctaPadding,
-                      onPressed: () => _openCart(context),
+                      onPressed: () => _onBack(context),
                     ),
                   ),
                 ],
@@ -324,24 +312,20 @@ class _BucketMixedItemsPageState extends ConsumerState<BucketMixedItemsPage> {
   }
 }
 
-class BucketMixedHeader extends StatelessWidget {
-  const BucketMixedHeader({
-    super.key,
+// ─── Header (no cart icon) ──────────────────────────────────────────────────
+
+class _BucketMixedHeader extends StatelessWidget {
+  const _BucketMixedHeader({
     required this.bucketBarcode,
     required this.bucketName,
     required this.itemTypesCount,
-    required this.cartCount,
     required this.onBack,
-    required this.onCart,
   });
 
   final String bucketBarcode;
   final String bucketName;
   final int itemTypesCount;
-  final int cartCount;
-
   final VoidCallback onBack;
-  final VoidCallback onCart;
 
   @override
   Widget build(BuildContext context) {
@@ -367,8 +351,6 @@ class BucketMixedHeader extends StatelessWidget {
                 style: t.headlineMedium,
               ),
             ),
-            const SizedBox(width: 6),
-            _CartIconButton(count: cartCount, onTap: onCart),
           ],
         ),
         const SizedBox(height: 10),
@@ -402,68 +384,7 @@ class BucketMixedHeader extends StatelessWidget {
   }
 }
 
-class _CartIconButton extends StatelessWidget {
-  const _CartIconButton({required this.count, required this.onTap});
-
-  final int count;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        InkResponse(
-          onTap: onTap,
-          radius: 26,
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.outline),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x0F000000),
-                  blurRadius: 10,
-                  offset: Offset(0, 6),
-                ),
-              ],
-            ),
-            alignment: Alignment.center,
-            child: const Icon(
-              Icons.shopping_cart_rounded,
-              color: AppColors.ink,
-            ),
-          ),
-        ),
-        if (count > 0)
-          Positioned(
-            right: -2,
-            top: -2,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: Colors.white, width: 2),
-              ),
-              child: Text(
-                '$count',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 11,
-                  height: 1,
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
+// ─── Search ─────────────────────────────────────────────────────────────────
 
 class _SearchCard extends StatelessWidget {
   const _SearchCard({required this.controller, required this.onChanged});
@@ -565,6 +486,8 @@ class _StickySearchDelegate extends SliverPersistentHeaderDelegate {
   }
 }
 
+// ─── Item card ──────────────────────────────────────────────────────────────
+
 class _MixedBucketItemCard extends StatelessWidget {
   const _MixedBucketItemCard({
     required this.name,
@@ -574,6 +497,7 @@ class _MixedBucketItemCard extends StatelessWidget {
     required this.compact,
     required this.tokens,
     required this.textTheme,
+    required this.emojiBase,
     required this.onDelta,
   });
 
@@ -585,6 +509,7 @@ class _MixedBucketItemCard extends StatelessWidget {
   final bool compact;
   final AppTokens tokens;
   final TextTheme textTheme;
+  final TextStyle emojiBase;
 
   final ValueChanged<int> onDelta;
 
@@ -629,7 +554,7 @@ class _MixedBucketItemCard extends StatelessWidget {
                   alignment: Alignment.center,
                   child: Text(
                     emoji,
-                    style: TextStyle(fontSize: emojiSize, height: 1),
+                    style: emojiBase.copyWith(fontSize: emojiSize),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -781,6 +706,8 @@ class _QtyStepperSelect extends StatelessWidget {
     );
   }
 }
+
+// ─── Empty state ────────────────────────────────────────────────────────────
 
 class _EmptyBucketState extends StatelessWidget {
   const _EmptyBucketState({

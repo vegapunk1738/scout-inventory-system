@@ -58,6 +58,24 @@ class BucketItem {
   }
 }
 
+enum BucketStockState {
+  fullyStocked,
+  inUse,
+  outOfStock;
+
+  factory BucketStockState.fromString(String s) {
+    switch (s) {
+      case 'fully_stocked':
+        return BucketStockState.fullyStocked;
+      case 'in_use':
+        return BucketStockState.inUse;
+      case 'out_of_stock':
+      default:
+        return BucketStockState.outOfStock;
+    }
+  }
+}
+
 /// Represents a bucket with its items and stock state.
 class Bucket {
   const Bucket({
@@ -66,6 +84,7 @@ class Bucket {
     required this.barcode,
     required this.createdAt,
     required this.createdBy,
+    required this.createdByName,
     required this.itemTypeCount,
     required this.stockState,
     required this.items,
@@ -76,6 +95,7 @@ class Bucket {
   final String barcode;
   final String createdAt;
   final String createdBy;
+  final String createdByName;
   final int itemTypeCount;
   final BucketStockState stockState;
   final List<BucketItem> items;
@@ -92,6 +112,7 @@ class Bucket {
       barcode: json['barcode'] as String,
       createdAt: json['created_at'] as String,
       createdBy: json['created_by'] as String,
+      createdByName: json['created_by_name'] as String? ?? 'Unknown',
       itemTypeCount: json['item_type_count'] as int? ?? items.length,
       stockState: BucketStockState.fromString(
         json['stock_state'] as String? ?? 'out_of_stock',
@@ -112,28 +133,11 @@ class Bucket {
       barcode: barcode,
       createdAt: createdAt,
       createdBy: createdBy,
+      createdByName: createdByName,
       itemTypeCount: itemTypeCount ?? this.itemTypeCount,
       stockState: stockState ?? this.stockState,
       items: items ?? this.items,
     );
-  }
-}
-
-enum BucketStockState {
-  fullyStocked,
-  inUse,
-  outOfStock;
-
-  static BucketStockState fromString(String value) {
-    switch (value) {
-      case 'fully_stocked':
-        return BucketStockState.fullyStocked;
-      case 'in_use':
-        return BucketStockState.inUse;
-      case 'out_of_stock':
-      default:
-        return BucketStockState.outOfStock;
-    }
   }
 }
 

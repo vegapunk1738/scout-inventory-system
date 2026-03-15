@@ -203,12 +203,21 @@ bucketRoutes.get("/", async (c) => {
         stock_state = "fully_stocked";
       }
 
+      const creator = (
+        await db
+          .select({ full_name: users.full_name })
+          .from(users)
+          .where(eq(users.id, bucket.created_by))
+          .limit(1)
+      )[0];
+
       return {
         id: bucket.id,
         name: bucket.name,
         barcode: bucket.barcode,
         created_at: bucket.created_at,
         created_by: bucket.created_by,
+        created_by_name: creator?.full_name ?? "Unknown",
         item_type_count: items.length,
         stock_state,
         items: itemsWithAvailable,

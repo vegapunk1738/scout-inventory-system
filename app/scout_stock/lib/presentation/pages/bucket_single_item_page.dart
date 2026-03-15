@@ -60,6 +60,7 @@ class _BucketItemPageState extends ConsumerState<BucketItemPage> {
     final item = Item(
       id: widget.itemId,
       name: widget.itemName,
+      bucketId: widget.bucketId,
       bucketBarcode: widget.barcode,
       bucketName: widget.bucketName,
       quantity: qty,

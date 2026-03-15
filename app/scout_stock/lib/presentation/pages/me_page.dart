@@ -11,6 +11,53 @@ import 'package:scout_stock/state/providers/auth_providers.dart';
 import 'package:scout_stock/state/providers/me_provider.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/// Formats a DateTime to "2:30 PM" style in the device's local timezone.
+String _formatTime(DateTime dt) {
+  final local = dt.toLocal();
+  final hour = local.hour;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final period = hour >= 12 ? 'PM' : 'AM';
+  final h12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+  return '$h12:$minute $period';
+}
+
+String _initials(String name) {
+  final parts = name
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((p) => p.isNotEmpty)
+      .toList();
+
+  if (parts.isEmpty) return '?';
+
+  if (parts.length == 1) {
+    final s = parts.first;
+    return (s.length >= 2 ? s.substring(0, 2) : s.substring(0, 1))
+        .toUpperCase();
+  }
+
+  return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+}
+
+DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
+
+String _sectionTitle(DateTime d) {
+  final today = _dateOnly(DateTime.now());
+  final isToday = _dateOnly(d) == today;
+
+  const months = [
+    'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
+    'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER',
+  ];
+
+  final base = '${months[d.month - 1]} ${d.day}';
+  return isToday ? '$base (TODAY)' : base;
+}
+
+// ─── Page ───────────────────────────────────────────────────────────────────
+
 class MePage extends ConsumerWidget {
   const MePage({super.key});
 
@@ -74,14 +121,11 @@ class MePage extends ConsumerWidget {
 
       final res = await notifier.submitReturn();
       if (!context.mounted) return;
-
       if (res.ok) {
         await showCheckoutResultDialog(
           context,
-          child: CheckoutResultDialog.success(
-            transactionId: res.txnId!,
-            title: 'Return Complete',
-            message: 'Items successfully returned.',
+          child: CheckoutResultDialog.returnSuccess(
+            itemCount: me.totalToReturn,
             onFinish: () {},
           ),
         );
@@ -89,7 +133,7 @@ class MePage extends ConsumerWidget {
         await showCheckoutResultDialog(
           context,
           child: CheckoutResultDialog.failure(
-            errorCode: res.error,
+            errorMessage: res.error,
             onRetry: () {},
             onClose: () {},
           ),
@@ -303,6 +347,8 @@ class MePage extends ConsumerWidget {
   }
 }
 
+// ─── Sticky header ──────────────────────────────────────────────────────────
+
 class _MeStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   _MeStickyHeaderDelegate({
     required this.extent,
@@ -328,49 +374,27 @@ class _MeStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   double get minExtent => extent;
-
   @override
   double get maxExtent => extent;
 
   @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final showShadow = overlapsContent || shrinkOffset > 0.5;
 
     final headerShadow = showShadow && tokens.cardShadow.isNotEmpty
-        ? [
-            tokens.cardShadow.first.copyWith(
-              blurRadius: 10,
-              offset: const Offset(0, 6),
-            ),
-          ]
+        ? [tokens.cardShadow.first.copyWith(blurRadius: 10, offset: const Offset(0, 6))]
         : const <BoxShadow>[];
 
     return Container(
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        boxShadow: headerShadow,
-      ),
+      decoration: BoxDecoration(color: AppColors.background, boxShadow: headerShadow),
       child: Padding(
         padding: EdgeInsets.fromLTRB(20, top + 12, 20, 12),
         child: Column(
           children: [
-            _MeHeader(
-              name: name,
-              role: role,
-              initials: initials,
-              onLogout: onLogout,
-            ),
+            _MeHeader(name: name, role: role, initials: initials, onLogout: onLogout),
             const SizedBox(height: 14),
-            _BorrowReturnPills(
-              mode: mode,
-              onTapBorrowed: onTapBorrowed,
-              onTapReturned: onTapReturned,
-            ),
+            _BorrowReturnPills(mode: mode, onTapBorrowed: onTapBorrowed, onTapReturned: onTapReturned),
           ],
         ),
       ),
@@ -379,76 +403,42 @@ class _MeStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   bool shouldRebuild(covariant _MeStickyHeaderDelegate oldDelegate) {
-    return extent != oldDelegate.extent ||
-        top != oldDelegate.top ||
-        name != oldDelegate.name ||
-        role != oldDelegate.role ||
-        initials != oldDelegate.initials ||
-        mode != oldDelegate.mode ||
+    return extent != oldDelegate.extent || top != oldDelegate.top ||
+        name != oldDelegate.name || role != oldDelegate.role ||
+        initials != oldDelegate.initials || mode != oldDelegate.mode ||
         onLogout != oldDelegate.onLogout;
   }
 }
 
 class _MeHeader extends StatelessWidget {
-  const _MeHeader({
-    required this.name,
-    required this.role,
-    required this.initials,
-    required this.onLogout,
-  });
-
-  final String name;
-  final String role;
-  final String initials;
+  const _MeHeader({required this.name, required this.role, required this.initials, required this.onLogout});
+  final String name, role, initials;
   final VoidCallback onLogout;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final tokens = Theme.of(context).extension<AppTokens>()!;
-
     return Row(
       children: [
         CircleAvatar(
           radius: 22,
           backgroundColor: AppColors.onPrimary,
-          child: Text(
-            initials,
-            style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-          ),
+          child: Text(initials, style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
         ),
         const SizedBox(width: 14),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: t.headlineMedium?.copyWith(fontSize: 20),
-              ),
+              Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.headlineMedium?.copyWith(fontSize: 20)),
               const SizedBox(height: 2),
-              Text(
-                role,
-                style: t.titleMedium?.copyWith(
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14,
-                ),
-              ),
+              Text(role, style: t.titleMedium?.copyWith(color: AppColors.primary, fontWeight: FontWeight.w800, fontSize: 14)),
             ],
           ),
         ),
         SizedBox(
-          width: 44,
-          height: 44,
-          child: IconButton(
-            onPressed: onLogout,
-            icon: const Icon(Icons.logout_rounded),
-            splashRadius: 22,
-            tooltip: 'Logout',
-          ),
+          width: 44, height: 44,
+          child: IconButton(onPressed: onLogout, icon: const Icon(Icons.logout_rounded), splashRadius: 22, tooltip: 'Logout'),
         ),
       ],
     );
@@ -456,24 +446,14 @@ class _MeHeader extends StatelessWidget {
 }
 
 class _BorrowReturnPills extends StatelessWidget {
-  const _BorrowReturnPills({
-    required this.mode,
-    required this.onTapBorrowed,
-    required this.onTapReturned,
-  });
-
+  const _BorrowReturnPills({required this.mode, required this.onTapBorrowed, required this.onTapReturned});
   final MeFilterMode mode;
-  final VoidCallback onTapBorrowed;
-  final VoidCallback onTapReturned;
+  final VoidCallback onTapBorrowed, onTapReturned;
 
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final t = Theme.of(context).textTheme;
-
-    final borrowedSelected = mode == MeFilterMode.borrowedOnly;
-    final returnedSelected = mode == MeFilterMode.returnedOnly;
-
     return Container(
       height: 56,
       decoration: BoxDecoration(
@@ -485,29 +465,9 @@ class _BorrowReturnPills extends StatelessWidget {
       padding: const EdgeInsets.all(6),
       child: Row(
         children: [
-          Expanded(
-            child: _Pill(
-              label: 'Borrowed',
-              selected: borrowedSelected,
-              selectedBg: AppColors.primary,
-              selectedFg: Colors.white,
-              unselectedFg: AppColors.muted,
-              textStyle: t.titleMedium,
-              onTap: onTapBorrowed,
-            ),
-          ),
+          Expanded(child: _Pill(label: 'Borrowed', selected: mode == MeFilterMode.borrowedOnly, selectedBg: AppColors.primary, selectedFg: Colors.white, unselectedFg: AppColors.muted, textStyle: t.titleMedium, onTap: onTapBorrowed)),
           const SizedBox(width: 6),
-          Expanded(
-            child: _Pill(
-              label: 'Returned',
-              selected: returnedSelected,
-              selectedBg: AppColors.ink.withValues(alpha: 0.72),
-              selectedFg: Colors.white,
-              unselectedFg: AppColors.muted,
-              textStyle: t.titleMedium,
-              onTap: onTapReturned,
-            ),
-          ),
+          Expanded(child: _Pill(label: 'Returned', selected: mode == MeFilterMode.returnedOnly, selectedBg: AppColors.ink.withValues(alpha: 0.72), selectedFg: Colors.white, unselectedFg: AppColors.muted, textStyle: t.titleMedium, onTap: onTapReturned)),
         ],
       ),
     );
@@ -515,21 +475,10 @@ class _BorrowReturnPills extends StatelessWidget {
 }
 
 class _Pill extends StatelessWidget {
-  const _Pill({
-    required this.label,
-    required this.selected,
-    required this.selectedBg,
-    required this.selectedFg,
-    required this.unselectedFg,
-    required this.textStyle,
-    required this.onTap,
-  });
-
+  const _Pill({required this.label, required this.selected, required this.selectedBg, required this.selectedFg, required this.unselectedFg, required this.textStyle, required this.onTap});
   final String label;
   final bool selected;
-  final Color selectedBg;
-  final Color selectedFg;
-  final Color unselectedFg;
+  final Color selectedBg, selectedFg, unselectedFg;
   final TextStyle? textStyle;
   final VoidCallback onTap;
 
@@ -542,43 +491,22 @@ class _Pill extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOutCubic,
-        decoration: BoxDecoration(
-          color: selected ? selectedBg : Colors.transparent,
-          borderRadius: BorderRadius.circular(tokens.radiusXl),
-        ),
+        decoration: BoxDecoration(color: selected ? selectedBg : Colors.transparent, borderRadius: BorderRadius.circular(tokens.radiusXl)),
         alignment: Alignment.center,
-        child: Text(
-          label,
-          style: (textStyle ?? const TextStyle()).copyWith(
-            color: selected ? selectedFg : unselectedFg,
-            fontWeight: FontWeight.w800,
-            fontSize: 14,
-          ),
-        ),
+        child: Text(label, style: (textStyle ?? const TextStyle()).copyWith(color: selected ? selectedFg : unselectedFg, fontWeight: FontWeight.w800, fontSize: 14)),
       ),
     );
   }
 }
 
+// ─── Row model ──────────────────────────────────────────────────────────────
+
 enum _MeRowKind { header, borrowed, returned }
 
 class _MeRow {
-  const _MeRow.header(this.header, {this.topGap = 0})
-    : kind = _MeRowKind.header,
-      borrowed = null,
-      returned = null;
-
-  const _MeRow.borrowed(this.borrowed)
-    : kind = _MeRowKind.borrowed,
-      header = null,
-      returned = null,
-      topGap = 0;
-
-  const _MeRow.returned(this.returned)
-    : kind = _MeRowKind.returned,
-      header = null,
-      borrowed = null,
-      topGap = 0;
+  const _MeRow.header(this.header, {this.topGap = 0}) : kind = _MeRowKind.header, borrowed = null, returned = null;
+  const _MeRow.borrowed(this.borrowed) : kind = _MeRowKind.borrowed, header = null, returned = null, topGap = 0;
+  const _MeRow.returned(this.returned) : kind = _MeRowKind.returned, header = null, borrowed = null, topGap = 0;
 
   final _MeRowKind kind;
   final String? header;
@@ -603,7 +531,6 @@ List<_MeRow> _buildRows({
       (map[key] ??= <_MeRow>[]).add(_MeRow.borrowed(b));
     }
   }
-
   if (includeReturned) {
     for (final r in returned) {
       final key = _dateOnly(r.returnedAt);
@@ -614,26 +541,18 @@ List<_MeRow> _buildRows({
   if (map.isEmpty) return const <_MeRow>[];
 
   final keys = map.keys.toList()..sort((a, b) => b.compareTo(a));
-
   final rows = <_MeRow>[];
+
   for (int i = 0; i < keys.length; i++) {
     final day = keys[i];
     rows.add(_MeRow.header(_sectionTitle(day), topGap: i == 0 ? 0 : 18));
 
     final bucket = map[day]!;
-    final borrowedRows = bucket
-        .where((x) => x.kind == _MeRowKind.borrowed)
-        .toList();
-    final returnedRows = bucket
-        .where((x) => x.kind == _MeRowKind.returned)
-        .toList();
+    final borrowedRows = bucket.where((x) => x.kind == _MeRowKind.borrowed).toList();
+    final returnedRows = bucket.where((x) => x.kind == _MeRowKind.returned).toList();
 
-    borrowedRows.sort(
-      (a, b) => a.borrowed!.item.name.compareTo(b.borrowed!.item.name),
-    );
-    returnedRows.sort(
-      (a, b) => a.returned!.item.name.compareTo(b.returned!.item.name),
-    );
+    borrowedRows.sort((a, b) => a.borrowed!.item.name.compareTo(b.borrowed!.item.name));
+    returnedRows.sort((a, b) => a.returned!.item.name.compareTo(b.returned!.item.name));
 
     rows.addAll(borrowedRows);
     rows.addAll(returnedRows);
@@ -642,9 +561,10 @@ List<_MeRow> _buildRows({
   return rows;
 }
 
+// ─── Date header ────────────────────────────────────────────────────────────
+
 class _DateHeader extends StatelessWidget {
   const _DateHeader({required this.title, required this.topGap});
-
   final String title;
   final double topGap;
 
@@ -652,22 +572,13 @@ class _DateHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final isToday = title.contains('(TODAY)');
-
     return Padding(
       padding: EdgeInsets.only(top: topGap, bottom: 12),
       child: Column(
         children: [
-          Row(
-            children: [
-              Text(
-                title,
-                style: t.labelMedium?.copyWith(
-                  color: isToday ? AppColors.primary : AppColors.muted,
-                  letterSpacing: 1.2,
-                ),
-              ),
-            ],
-          ),
+          Row(children: [
+            Text(title, style: t.labelMedium?.copyWith(color: isToday ? AppColors.primary : AppColors.muted, letterSpacing: 1.2)),
+          ]),
           const SizedBox(height: 10),
           const Divider(height: 1),
           const SizedBox(height: 12),
@@ -676,6 +587,55 @@ class _DateHeader extends StatelessWidget {
     );
   }
 }
+
+// ─── Metadata pill (right side) ─────────────────────────────────────────────
+
+class _MetaInfoColumn extends StatelessWidget {
+  const _MetaInfoColumn({
+    required this.managedBy,
+    required this.actionLabel,
+    required this.timeString,
+    required this.compact,
+  });
+
+  final String managedBy;
+  final String actionLabel;
+  final String timeString;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final labelStyle = t.bodySmall?.copyWith(
+      color: AppColors.muted,
+      fontWeight: FontWeight.w600,
+      fontSize: compact ? 9.5 : 10,
+      height: 1.2,
+    );
+    final valueStyle = t.bodySmall?.copyWith(
+      color: AppColors.ink,
+      fontWeight: FontWeight.w700,
+      fontSize: compact ? 10 : 10.5,
+      height: 1.2,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('Managed by', style: labelStyle, textAlign: TextAlign.right),
+        const SizedBox(height: 1),
+        Text(managedBy, style: valueStyle, textAlign: TextAlign.right, maxLines: 1, overflow: TextOverflow.ellipsis),
+        const SizedBox(height: 6),
+        Text(actionLabel, style: labelStyle, textAlign: TextAlign.right),
+        const SizedBox(height: 1),
+        Text(timeString, style: valueStyle, textAlign: TextAlign.right),
+      ],
+    );
+  }
+}
+
+// ─── Borrowed card ──────────────────────────────────────────────────────────
 
 class _BorrowedCard extends StatelessWidget {
   const _BorrowedCard({
@@ -715,18 +675,14 @@ class _BorrowedCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: tile,
-                height: tile,
+                width: tile, height: tile,
                 decoration: BoxDecoration(
                   color: AppColors.background,
                   borderRadius: BorderRadius.circular(tokens.radiusLg),
                   border: Border.all(color: AppColors.outline),
                 ),
                 alignment: Alignment.center,
-                child: Text(
-                  item.emoji,
-                  style: emojiBase.copyWith(fontSize: emojiSize),
-                ),
+                child: Text(item.emoji, style: emojiBase.copyWith(fontSize: emojiSize)),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -735,45 +691,33 @@ class _BorrowedCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        item.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: textTheme.titleMedium?.copyWith(
-                          fontSize: compact ? 15 : 16,
-                          height: 1.15,
-                        ),
-                      ),
+                      Text(item.name, maxLines: 2, overflow: TextOverflow.ellipsis,
+                        style: textTheme.titleMedium?.copyWith(fontSize: compact ? 15 : 16, height: 1.15)),
                       const SizedBox(height: 4),
-                      Text(
-                        '${item.bucketName} | ${item.bucketBarcode}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: textTheme.bodyMedium?.copyWith(
-                          color: AppColors.muted,
-                          fontWeight: FontWeight.w700,
-                          fontSize: compact ? 11.5 : 12,
-                          height: 1.1,
-                        ),
-                      ),
+                      Text('${item.bucketName} | ${item.bucketBarcode}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: textTheme.bodyMedium?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w700, fontSize: compact ? 11.5 : 12, height: 1.1)),
                     ],
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
+              _MetaInfoColumn(
+                managedBy: record.managedBy,
+                actionLabel: 'Borrowed at',
+                timeString: _formatTime(record.checkedOutAt),
+                compact: compact,
+              ),
             ],
           ),
           SizedBox(height: compact ? 10 : 12),
-          _ReturnQtyStepperHold(
-            value: item.quantity,
-            max: item.maxQuantity,
-            compact: compact,
-            onChanged: onChanged,
-          ),
+          _ReturnQtyStepperHold(value: item.quantity, max: item.maxQuantity, compact: compact, onChanged: onChanged),
         ],
       ),
     );
   }
 }
+
+// ─── Returned card ──────────────────────────────────────────────────────────
 
 class _ReturnedCard extends StatelessWidget {
   const _ReturnedCard({
@@ -815,18 +759,14 @@ class _ReturnedCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: tile,
-                height: tile,
+                width: tile, height: tile,
                 decoration: BoxDecoration(
                   color: AppColors.background,
                   borderRadius: BorderRadius.circular(tokens.radiusLg),
                   border: Border.all(color: AppColors.outline),
                 ),
                 alignment: Alignment.center,
-                child: Text(
-                  item.emoji,
-                  style: emojiBase.copyWith(fontSize: emojiSize),
-                ),
+                child: Text(item.emoji, style: emojiBase.copyWith(fontSize: emojiSize)),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -835,45 +775,33 @@ class _ReturnedCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        item.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                      Text(item.name, maxLines: 2, overflow: TextOverflow.ellipsis,
                         style: textTheme.titleMedium?.copyWith(
-                          fontSize: compact ? 15 : 16,
-                          height: 1.15,
+                          fontSize: compact ? 15 : 16, height: 1.15,
                           color: AppColors.muted,
-                          decoration: crossline
-                              ? TextDecoration.lineThrough
-                              : TextDecoration.none,
-                        ),
-                      ),
+                          decoration: crossline ? TextDecoration.lineThrough : TextDecoration.none,
+                        )),
                       const SizedBox(height: 4),
-                      Text(
-                        '${item.bucketName} | ${item.bucketBarcode}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      Text('${item.bucketName} | ${item.bucketBarcode}', maxLines: 1, overflow: TextOverflow.ellipsis,
                         style: textTheme.bodyMedium?.copyWith(
                           color: AppColors.muted.withValues(alpha: 0.85),
-                          fontWeight: FontWeight.w700,
-                          fontSize: compact ? 11.5 : 12,
-                          height: 1.1,
-                        ),
-                      ),
+                          fontWeight: FontWeight.w700, fontSize: compact ? 11.5 : 12, height: 1.1,
+                        )),
                     ],
                   ),
                 ),
               ),
               const SizedBox(width: 8),
-              _StatusPill(compact: compact),
+              _MetaInfoColumn(
+                managedBy: record.managedBy,
+                actionLabel: 'Returned at',
+                timeString: _formatTime(record.returnedAt),
+                compact: compact,
+              ),
             ],
           ),
           SizedBox(height: compact ? 10 : 12),
-          _ReturnedQtyBar(
-            returned: item.quantity,
-            max: item.maxQuantity,
-            compact: compact,
-          ),
+          _ReturnedQtyBar(returned: item.quantity, max: item.maxQuantity, compact: compact),
         ],
       ),
     );
@@ -882,41 +810,11 @@ class _ReturnedCard extends StatelessWidget {
   }
 }
 
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.compact});
-
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = Theme.of(context).extension<AppTokens>()!;
-    final box = compact ? 34.0 : 38.0;
-    final iconSize = compact ? 18.0 : 20.0;
-
-    return Container(
-      width: box,
-      height: box,
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.circular(tokens.radiusLg),
-        border: Border.all(color: AppColors.outline),
-      ),
-      alignment: Alignment.center,
-      child: Icon(Icons.check_rounded, size: iconSize, color: AppColors.muted),
-    );
-  }
-}
+// ─── Stepper / qty widgets ──────────────────────────────────────────────────
 
 class _ReturnQtyStepperHold extends StatelessWidget {
-  const _ReturnQtyStepperHold({
-    required this.value,
-    required this.max,
-    required this.compact,
-    required this.onChanged,
-  });
-
-  final int value;
-  final int max;
+  const _ReturnQtyStepperHold({required this.value, required this.max, required this.compact, required this.onChanged});
+  final int value, max;
   final bool compact;
   final ValueChanged<int> onChanged;
 
@@ -924,87 +822,29 @@ class _ReturnQtyStepperHold extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final t = Theme.of(context).textTheme;
-
     final canMinus = value > 0;
     final canPlus = value < max;
-
     final height = compact ? 50.0 : 56.0;
     final btnSize = compact ? 40.0 : 44.0;
     final iconSize = compact ? 20.0 : 22.0;
-
     final disabledFg = AppColors.muted.withValues(alpha: 0.45);
-
     int clampNext(int next) => next.clamp(0, max);
 
     return Container(
       height: height,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(tokens.radiusLg),
-        border: Border.all(color: AppColors.outline),
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(tokens.radiusLg), border: Border.all(color: AppColors.outline)),
       child: Row(
         children: [
           const SizedBox(width: 6),
-          HoldIconButton(
-            enabled: canMinus,
-            maxCount: max,
-            icon: Icons.remove_rounded,
-            iconColor: canMinus ? AppColors.primary : disabledFg,
-            fill: AppColors.background,
-            border: Colors.transparent,
-            width: btnSize,
-            height: btnSize,
-            iconSize: iconSize,
-            radius: tokens.radiusLg,
-            onTap: canMinus ? () => onChanged(clampNext(value - 1)) : null,
-            onHoldTick: canMinus
-                ? (step) => onChanged(clampNext(value - step))
-                : null,
-          ),
+          HoldIconButton(enabled: canMinus, maxCount: max, icon: Icons.remove_rounded, iconColor: canMinus ? AppColors.primary : disabledFg, fill: AppColors.background, border: Colors.transparent, width: btnSize, height: btnSize, iconSize: iconSize, radius: tokens.radiusLg, onTap: canMinus ? () => onChanged(clampNext(value - 1)) : null, onHoldTick: canMinus ? (step) => onChanged(clampNext(value - step)) : null),
           const SizedBox(width: 6),
-          Expanded(
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '$value',
-                    style: (compact ? t.titleLarge : t.headlineSmall)?.copyWith(
-                      fontWeight: FontWeight.w900,
-                      height: 1,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'of $max to be returned',
-                    style: t.bodySmall?.copyWith(
-                      color: AppColors.muted,
-                      fontWeight: FontWeight.w700,
-                      height: 1,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          Expanded(child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('$value', style: (compact ? t.titleLarge : t.headlineSmall)?.copyWith(fontWeight: FontWeight.w900, height: 1)),
+            const SizedBox(height: 2),
+            Text('of $max to be returned', style: t.bodySmall?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w700, height: 1)),
+          ]))),
           const SizedBox(width: 6),
-          HoldIconButton(
-            enabled: canPlus,
-            maxCount: max,
-            icon: Icons.add_rounded,
-            iconColor: canPlus ? AppColors.primary : disabledFg,
-            fill: AppColors.background,
-            border: Colors.transparent,
-            width: btnSize,
-            height: btnSize,
-            iconSize: iconSize,
-            radius: tokens.radiusLg,
-            onTap: canPlus ? () => onChanged(clampNext(value + 1)) : null,
-            onHoldTick: canPlus
-                ? (step) => onChanged(clampNext(value + step))
-                : null,
-          ),
+          HoldIconButton(enabled: canPlus, maxCount: max, icon: Icons.add_rounded, iconColor: canPlus ? AppColors.primary : disabledFg, fill: AppColors.background, border: Colors.transparent, width: btnSize, height: btnSize, iconSize: iconSize, radius: tokens.radiusLg, onTap: canPlus ? () => onChanged(clampNext(value + 1)) : null, onHoldTick: canPlus ? (step) => onChanged(clampNext(value + step)) : null),
           const SizedBox(width: 6),
         ],
       ),
@@ -1013,132 +853,49 @@ class _ReturnQtyStepperHold extends StatelessWidget {
 }
 
 class _ReturnedQtyBar extends StatelessWidget {
-  const _ReturnedQtyBar({
-    required this.returned,
-    required this.max,
-    required this.compact,
-  });
-
-  final int returned;
-  final int max;
+  const _ReturnedQtyBar({required this.returned, required this.max, required this.compact});
+  final int returned, max;
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final t = Theme.of(context).textTheme;
-
     final height = compact ? 50.0 : 56.0;
-
     return Container(
       height: height,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(tokens.radiusLg),
-        border: Border.all(color: AppColors.outline),
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(tokens.radiusLg), border: Border.all(color: AppColors.outline)),
       alignment: Alignment.center,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '$returned',
-            style: (compact ? t.titleLarge : t.headlineSmall)?.copyWith(
-              fontWeight: FontWeight.w900,
-              height: 1,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            'of $max returned',
-            style: t.bodySmall?.copyWith(
-              color: AppColors.muted,
-              fontWeight: FontWeight.w700,
-              height: 1,
-            ),
-          ),
-        ],
-      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('$returned', style: (compact ? t.titleLarge : t.headlineSmall)?.copyWith(fontWeight: FontWeight.w900, height: 1)),
+        const SizedBox(height: 2),
+        Text('of $max returned', style: t.bodySmall?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w700, height: 1)),
+      ]),
     );
   }
 }
 
-class _EmptyMeState extends StatelessWidget {
-  const _EmptyMeState({
-    required this.emptyTitle,
-    required this.emptySubtitle,
-    required this.emptyEmoji,
-    required this.emojiBase,
-    required this.titleStyle,
-    required this.bodyStyle,
-  });
+// ─── Empty state ────────────────────────────────────────────────────────────
 
-  final String emptyTitle;
-  final String emptySubtitle;
-  final String emptyEmoji;
+class _EmptyMeState extends StatelessWidget {
+  const _EmptyMeState({required this.emptyTitle, required this.emptySubtitle, required this.emptyEmoji, required this.emojiBase, required this.titleStyle, required this.bodyStyle});
+  final String emptyTitle, emptySubtitle, emptyEmoji;
   final TextStyle emojiBase;
-  final TextStyle? titleStyle;
-  final TextStyle? bodyStyle;
+  final TextStyle? titleStyle, bodyStyle;
 
   @override
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(emptyEmoji, style: emojiBase.copyWith(fontSize: 54)),
-            const SizedBox(height: 10),
-            Text(emptyTitle, style: titleStyle, textAlign: TextAlign.center),
-            const SizedBox(height: 8),
-            Text(emptySubtitle, style: bodyStyle, textAlign: TextAlign.center),
-          ],
-        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(emptyEmoji, style: emojiBase.copyWith(fontSize: 54)),
+          const SizedBox(height: 10),
+          Text(emptyTitle, style: titleStyle, textAlign: TextAlign.center),
+          const SizedBox(height: 8),
+          Text(emptySubtitle, style: bodyStyle, textAlign: TextAlign.center),
+        ]),
       ),
     );
   }
-}
-
-String _initials(String name) {
-  final parts = name
-      .trim()
-      .split(RegExp(r'\s+'))
-      .where((p) => p.isNotEmpty)
-      .toList();
-
-  if (parts.isEmpty) return '?';
-
-  if (parts.length == 1) {
-    final s = parts.first;
-    return (s.length >= 2 ? s.substring(0, 2) : s.substring(0, 1))
-        .toUpperCase();
-  }
-
-  return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-}
-
-DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
-
-String _sectionTitle(DateTime d) {
-  final today = _dateOnly(DateTime.now());
-  final isToday = _dateOnly(d) == today;
-
-  const months = [
-    'JANUARY',
-    'FEBRUARY',
-    'MARCH',
-    'APRIL',
-    'MAY',
-    'JUNE',
-    'JULY',
-    'AUGUST',
-    'SEPTEMBER',
-    'OCTOBER',
-    'NOVEMBER',
-    'DECEMBER',
-  ];
-
-  final base = '${months[d.month - 1]} ${d.day}';
-  return isToday ? '$base (TODAY)' : base;
 }

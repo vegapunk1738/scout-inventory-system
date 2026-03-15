@@ -7,6 +7,7 @@ import {
   transaction_items,
   item_types,
   buckets,
+  users,
 } from "../db/schema";
 import {
   NotFoundError,
@@ -72,7 +73,6 @@ async function getAvailableCount(
     .where(eq(transaction_items.item_type_id, itemTypeId));
 
   const net = result[0]?.net ?? 0;
-  // net will be negative when more items are checked out than returned
   const borrowed = Math.max(0, -net);
   const available = Math.max(0, item.quantity + net);
 
@@ -111,6 +111,78 @@ async function getUserBorrowedCount(
   return Math.max(0, result[0]?.borrowed ?? 0);
 }
 
+/**
+ * Validate that all referenced buckets and item_types exist.
+ * Returns a map of item_type_id → { itemName, bucketName } for error messages.
+ * Throws NotFoundError if any entity is missing.
+ */
+async function validateEntitiesExist(
+  db: Env["Variables"]["db"],
+  items: Array<{ bucket_id: string; item_type_id: string }>
+): Promise<Map<string, { itemName: string; bucketName: string }>> {
+  const info = new Map<string, { itemName: string; bucketName: string }>();
+
+  // Deduplicate IDs
+  const uniqueBucketIds = [...new Set(items.map((i) => i.bucket_id))];
+  const uniqueItemTypeIds = [...new Set(items.map((i) => i.item_type_id))];
+
+  // Validate buckets exist
+  for (const bucketId of uniqueBucketIds) {
+    const bucket = (
+      await db
+        .select({ id: buckets.id, name: buckets.name })
+        .from(buckets)
+        .where(eq(buckets.id, bucketId))
+        .limit(1)
+    )[0];
+
+    if (!bucket) {
+      throw new NotFoundError(`Bucket (${bucketId})`);
+    }
+  }
+
+  // Validate item_types exist and belong to their declared bucket
+  for (const item of items) {
+    const itemType = (
+      await db
+        .select({
+          id: item_types.id,
+          name: item_types.name,
+          bucket_id: item_types.bucket_id,
+        })
+        .from(item_types)
+        .where(eq(item_types.id, item.item_type_id))
+        .limit(1)
+    )[0];
+
+    if (!itemType) {
+      throw new NotFoundError(`Item type (${item.item_type_id})`);
+    }
+
+    if (itemType.bucket_id !== item.bucket_id) {
+      throw new ConflictError(
+        `Item "${itemType.name}" does not belong to the specified bucket`
+      );
+    }
+
+    // Look up bucket name for error messages
+    const bucket = (
+      await db
+        .select({ name: buckets.name })
+        .from(buckets)
+        .where(eq(buckets.id, item.bucket_id))
+        .limit(1)
+    )[0];
+
+    info.set(item.item_type_id, {
+      itemName: itemType.name,
+      bucketName: bucket?.name ?? "Unknown bucket",
+    });
+  }
+
+  return info;
+}
+
 // ─── Routes ─────────────────────────────────────────────────────────────────
 
 const transactionRoutes = new Hono<Env>();
@@ -122,9 +194,10 @@ transactionRoutes.use("/*", auth());
 transactionRoutes.post("/checkout", async (c) => {
   const body = CheckoutBody.parse(await c.req.json());
   const db = c.get("db");
+  const d1 = c.env.DB;
   const jwt = c.get("jwtPayload");
 
-  // Idempotency check
+  // ── Step 1: Idempotency check ──────────────────────────────────────────
   const existingTx = (
     await db
       .select({ id: transactions.id })
@@ -134,51 +207,123 @@ transactionRoutes.post("/checkout", async (c) => {
   )[0];
 
   if (existingTx) {
-    // Already processed — return success (idempotent)
-    return c.json({ data: { transaction_id: existingTx.id, idempotent: true } });
+    return c.json({
+      data: { transaction_id: existingTx.id, idempotent: true },
+    });
   }
 
-  // Validate availability for each item
+  // ── Step 2: Validate all entities exist ────────────────────────────────
+  const entityInfo = await validateEntitiesExist(db, body.items);
+
+  // ── Step 3: Pre-check availability (fast rejection) ────────────────────
   for (const item of body.items) {
     const { available } = await getAvailableCount(db, item.item_type_id);
     if (item.quantity > available) {
-      const itemInfo = (
-        await db
-          .select({ name: item_types.name })
-          .from(item_types)
-          .where(eq(item_types.id, item.item_type_id))
-          .limit(1)
-      )[0];
-
+      const info = entityInfo.get(item.item_type_id);
       throw new ConflictError(
-        `Not enough "${itemInfo?.name ?? "item"}" available — requested ${item.quantity}, only ${available} in stock`
+        `Not enough "${info?.itemName ?? "item"}" available — requested ${item.quantity}, only ${available} in stock`
       );
     }
   }
 
-  // Create transaction
+  // ── Step 4: Atomic insert via D1 batch ─────────────────────────────────
+  // D1 batch = single SQLite transaction = serialized writes = no race
   const txId = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  await db.insert(transactions).values({
-    id: txId,
-    type: "checkout",
-    user_id: jwt.sub,
-    created_at: now,
-    idempotency_key: body.idempotency_key,
-  });
+  const statements: D1PreparedStatement[] = [];
 
-  // Create transaction items
+  // Insert transaction header
+  statements.push(
+    d1.prepare(
+      `INSERT INTO transactions (id, type, user_id, created_at, idempotency_key) VALUES (?1, 'checkout', ?2, ?3, ?4)`
+    ).bind(txId, jwt.sub, now, body.idempotency_key)
+  );
+
+  // Insert each transaction item
   for (const item of body.items) {
-    await db.insert(transaction_items).values({
-      id: crypto.randomUUID(),
-      transaction_id: txId,
-      bucket_id: item.bucket_id,
-      item_type_id: item.item_type_id,
-      quantity: item.quantity,
-      direction: -1, // checkout = items leave inventory
-      status: "normal",
-    });
+    statements.push(
+      d1.prepare(
+        `INSERT INTO transaction_items (id, transaction_id, bucket_id, item_type_id, quantity, direction, status) VALUES (?1, ?2, ?3, ?4, ?5, -1, 'normal')`
+      ).bind(
+        crypto.randomUUID(),
+        txId,
+        item.bucket_id,
+        item.item_type_id,
+        item.quantity
+      )
+    );
+  }
+
+  // Post-insert availability checks (within same transaction)
+  // This catches race conditions: if another request sneaked in between
+  // our pre-check and our insert, the post-check will detect negative inventory.
+  for (const item of body.items) {
+    statements.push(
+      d1.prepare(
+        `SELECT
+          it.quantity + COALESCE(
+            (SELECT SUM(ti.direction * ti.quantity) FROM transaction_items ti WHERE ti.item_type_id = ?1),
+            0
+          ) as available,
+          it.name
+        FROM item_types it
+        WHERE it.id = ?1`
+      ).bind(item.item_type_id)
+    );
+  }
+
+  const results = await d1.batch(statements);
+
+  // ── Step 5: Verify no inventory went negative ──────────────────────────
+  // The post-check results are at the end of the batch results array.
+  // Index: 1 (txn header) + N (items) + i (check for item i)
+  const checkStartIndex = 1 + body.items.length;
+
+  for (let i = 0; i < body.items.length; i++) {
+    const checkResult = results[checkStartIndex + i] as D1Result;
+    const row = checkResult.results?.[0] as
+      | { available: number; name: string }
+      | undefined;
+
+    if (row && row.available < 0) {
+      // Race condition detected — inventory went negative.
+      // The batch already committed, so we need to compensate by inserting
+      // a reversal transaction that undoes this checkout.
+      const reversalId = crypto.randomUUID();
+      const reversalStatements: D1PreparedStatement[] = [
+        d1.prepare(
+          `INSERT INTO transactions (id, type, user_id, created_at, idempotency_key) VALUES (?1, 'return', ?2, ?3, ?4)`
+        ).bind(
+          reversalId,
+          jwt.sub,
+          new Date().toISOString(),
+          `reversal-${txId}`
+        ),
+      ];
+
+      // Reverse ALL items from the original checkout
+      for (const item of body.items) {
+        reversalStatements.push(
+          d1.prepare(
+            `INSERT INTO transaction_items (id, transaction_id, bucket_id, item_type_id, quantity, direction, status) VALUES (?1, ?2, ?3, ?4, ?5, 1, 'normal')`
+          ).bind(
+            crypto.randomUUID(),
+            reversalId,
+            item.bucket_id,
+            item.item_type_id,
+            item.quantity
+          )
+        );
+      }
+
+      await d1.batch(reversalStatements);
+
+      const info = entityInfo.get(body.items[i].item_type_id);
+      throw new ConflictError(
+        `"${info?.itemName ?? "item"}" was just checked out by someone else — please try again`
+      );
+    }
   }
 
   return c.json(
@@ -192,9 +337,10 @@ transactionRoutes.post("/checkout", async (c) => {
 transactionRoutes.post("/return", async (c) => {
   const body = ReturnBody.parse(await c.req.json());
   const db = c.get("db");
+  const d1 = c.env.DB;
   const jwt = c.get("jwtPayload");
 
-  // Idempotency check
+  // ── Step 1: Idempotency check ──────────────────────────────────────────
   const existingTx = (
     await db
       .select({ id: transactions.id })
@@ -204,17 +350,63 @@ transactionRoutes.post("/return", async (c) => {
   )[0];
 
   if (existingTx) {
-    return c.json({ data: { transaction_id: existingTx.id, idempotent: true } });
+    return c.json({
+      data: { transaction_id: existingTx.id, idempotent: true },
+    });
   }
 
-  // Validate: user can't return more than they have borrowed
+  // ── Step 2: Validate entities exist ────────────────────────────────────
+  // For returns, we're more lenient: if a bucket was deleted but the user
+  // still has items checked out, they should still be able to return them.
+  // We validate item_types exist but allow missing buckets (use the bucket_id
+  // from the original checkout).
+  for (const item of body.items) {
+    // Check item_type exists (it may have been removed from a bucket but
+    // should still exist in the DB since we don't hard-delete while borrowed)
+    const itemType = (
+      await db
+        .select({ id: item_types.id, name: item_types.name })
+        .from(item_types)
+        .where(eq(item_types.id, item.item_type_id))
+        .limit(1)
+    )[0];
+
+    if (!itemType) {
+      // If the item_type was hard-deleted, we still allow the return
+      // by checking if the user has any transaction history for it.
+      const hasHistory = (
+        await db
+          .select({ id: transaction_items.id })
+          .from(transaction_items)
+          .innerJoin(
+            transactions,
+            eq(transaction_items.transaction_id, transactions.id)
+          )
+          .where(
+            and(
+              eq(transactions.user_id, jwt.sub),
+              eq(transaction_items.item_type_id, item.item_type_id)
+            )
+          )
+          .limit(1)
+      )[0];
+
+      if (!hasHistory) {
+        throw new NotFoundError(`Item type (${item.item_type_id})`);
+      }
+    }
+  }
+
+  // ── Step 3: Validate user has enough borrowed to return ────────────────
   for (const item of body.items) {
     const userBorrowed = await getUserBorrowedCount(
       db,
       jwt.sub,
       item.item_type_id
     );
+
     if (item.quantity > userBorrowed) {
+      // Look up item name for a helpful error message
       const itemInfo = (
         await db
           .select({ name: item_types.name })
@@ -229,30 +421,33 @@ transactionRoutes.post("/return", async (c) => {
     }
   }
 
-  // Create transaction
+  // ── Step 4: Atomic insert via D1 batch ─────────────────────────────────
   const txId = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  await db.insert(transactions).values({
-    id: txId,
-    type: "return",
-    user_id: jwt.sub,
-    created_at: now,
-    idempotency_key: body.idempotency_key,
-  });
+  const statements: D1PreparedStatement[] = [];
 
-  // Create transaction items
+  statements.push(
+    d1.prepare(
+      `INSERT INTO transactions (id, type, user_id, created_at, idempotency_key) VALUES (?1, 'return', ?2, ?3, ?4)`
+    ).bind(txId, jwt.sub, now, body.idempotency_key)
+  );
+
   for (const item of body.items) {
-    await db.insert(transaction_items).values({
-      id: crypto.randomUUID(),
-      transaction_id: txId,
-      bucket_id: item.bucket_id,
-      item_type_id: item.item_type_id,
-      quantity: item.quantity,
-      direction: 1, // return = items enter inventory
-      status: "normal",
-    });
+    statements.push(
+      d1.prepare(
+        `INSERT INTO transaction_items (id, transaction_id, bucket_id, item_type_id, quantity, direction, status) VALUES (?1, ?2, ?3, ?4, ?5, 1, 'normal')`
+      ).bind(
+        crypto.randomUUID(),
+        txId,
+        item.bucket_id,
+        item.item_type_id,
+        item.quantity
+      )
+    );
   }
+
+  await d1.batch(statements);
 
   return c.json(
     { data: { transaction_id: txId, idempotent: false } },
@@ -267,15 +462,17 @@ transactionRoutes.get("/me", async (c) => {
   const jwt = c.get("jwtPayload");
 
   // Get all transaction items for this user, grouped by item_type
+  // Uses LEFT JOIN so items still show even if bucket/item_type was deleted
   const borrowed = await db
     .select({
       item_type_id: transaction_items.item_type_id,
       bucket_id: transaction_items.bucket_id,
-      item_name: item_types.name,
-      item_emoji: item_types.emoji,
-      bucket_name: buckets.name,
-      bucket_barcode: buckets.barcode,
-      item_total_quantity: item_types.quantity,
+      item_name: sql<string>`COALESCE(${item_types.name}, 'Deleted item')`,
+      item_emoji: sql<string>`COALESCE(${item_types.emoji}, '📦')`,
+      bucket_name: sql<string>`COALESCE(${buckets.name}, 'Deleted bucket')`,
+      bucket_barcode: sql<string>`COALESCE(${buckets.barcode}, '')`,
+      item_total_quantity: sql<number>`COALESCE(${item_types.quantity}, 0)`,
+      managed_by: sql<string>`COALESCE((SELECT full_name FROM users WHERE id = ${buckets.created_by}), 'Unknown')`,
       borrowed: sql<number>`
         SUM(CASE WHEN ${transaction_items.direction} = -1 THEN ${transaction_items.quantity} ELSE 0 END)
         -
@@ -287,8 +484,8 @@ transactionRoutes.get("/me", async (c) => {
       transactions,
       eq(transaction_items.transaction_id, transactions.id)
     )
-    .innerJoin(item_types, eq(transaction_items.item_type_id, item_types.id))
-    .innerJoin(buckets, eq(transaction_items.bucket_id, buckets.id))
+    .leftJoin(item_types, eq(transaction_items.item_type_id, item_types.id))
+    .leftJoin(buckets, eq(transaction_items.bucket_id, buckets.id))
     .where(eq(transactions.user_id, jwt.sub))
     .groupBy(transaction_items.item_type_id)
     .having(sql`
@@ -305,9 +502,11 @@ transactionRoutes.get("/me", async (c) => {
       created_at: transactions.created_at,
       item_type_id: transaction_items.item_type_id,
       bucket_id: transaction_items.bucket_id,
-      item_name: item_types.name,
-      item_emoji: item_types.emoji,
-      bucket_name: buckets.name,
+      item_name: sql<string>`COALESCE(${item_types.name}, 'Deleted item')`,
+      item_emoji: sql<string>`COALESCE(${item_types.emoji}, '📦')`,
+      bucket_name: sql<string>`COALESCE(${buckets.name}, 'Deleted bucket')`,
+      bucket_barcode: sql<string>`COALESCE(${buckets.barcode}, '')`,
+      managed_by: sql<string>`COALESCE((SELECT full_name FROM users WHERE id = ${buckets.created_by}), 'Unknown')`,
       quantity: transaction_items.quantity,
       status: transaction_items.status,
     })
@@ -316,8 +515,8 @@ transactionRoutes.get("/me", async (c) => {
       transactions,
       eq(transaction_items.transaction_id, transactions.id)
     )
-    .innerJoin(item_types, eq(transaction_items.item_type_id, item_types.id))
-    .innerJoin(buckets, eq(transaction_items.bucket_id, buckets.id))
+    .leftJoin(item_types, eq(transaction_items.item_type_id, item_types.id))
+    .leftJoin(buckets, eq(transaction_items.bucket_id, buckets.id))
     .where(
       and(
         eq(transactions.user_id, jwt.sub),
@@ -330,7 +529,6 @@ transactionRoutes.get("/me", async (c) => {
   // Get checkout timestamps per item for borrowed items
   const borrowedWithDates = await Promise.all(
     borrowed.map(async (b) => {
-      // Get the most recent checkout date for this item
       const lastCheckout = (
         await db
           .select({ created_at: transactions.created_at })
@@ -357,6 +555,7 @@ transactionRoutes.get("/me", async (c) => {
         item_emoji: b.item_emoji,
         bucket_name: b.bucket_name,
         bucket_barcode: b.bucket_barcode,
+        managed_by: b.managed_by,
         borrowed: Number(b.borrowed),
         item_total_quantity: b.item_total_quantity,
         checked_out_at: lastCheckout?.created_at ?? null,
@@ -367,61 +566,21 @@ transactionRoutes.get("/me", async (c) => {
   return c.json({
     data: {
       borrowed: borrowedWithDates,
-      return_history: returnHistory,
+      return_history: returnHistory.map((r) => ({
+        transaction_id: r.transaction_id,
+        created_at: r.created_at,
+        item_type_id: r.item_type_id,
+        bucket_id: r.bucket_id,
+        item_name: r.item_name,
+        item_emoji: r.item_emoji,
+        bucket_name: r.bucket_name,
+        bucket_barcode: r.bucket_barcode,
+        managed_by: r.managed_by,
+        quantity: r.quantity,
+        status: r.status,
+      })),
     },
   });
 });
-
-// ─── GET /transactions/user/:userId — admin view of user's borrowed items ──
-
-transactionRoutes.get(
-  "/user/:userId",
-  requireRole("admin"),
-  async (c) => {
-    const userId = c.req.param("userId");
-    const db = c.get("db");
-
-    const borrowed = await db
-      .select({
-        item_type_id: transaction_items.item_type_id,
-        bucket_id: transaction_items.bucket_id,
-        item_name: item_types.name,
-        item_emoji: item_types.emoji,
-        bucket_name: buckets.name,
-        bucket_barcode: buckets.barcode,
-        item_total_quantity: item_types.quantity,
-        borrowed: sql<number>`
-          SUM(CASE WHEN ${transaction_items.direction} = -1 THEN ${transaction_items.quantity} ELSE 0 END)
-          -
-          SUM(CASE WHEN ${transaction_items.direction} = 1 THEN ${transaction_items.quantity} ELSE 0 END)
-        `,
-      })
-      .from(transaction_items)
-      .innerJoin(
-        transactions,
-        eq(transaction_items.transaction_id, transactions.id)
-      )
-      .innerJoin(item_types, eq(transaction_items.item_type_id, item_types.id))
-      .innerJoin(buckets, eq(transaction_items.bucket_id, buckets.id))
-      .where(eq(transactions.user_id, userId))
-      .groupBy(transaction_items.item_type_id)
-      .having(sql`
-        SUM(CASE WHEN ${transaction_items.direction} = -1 THEN ${transaction_items.quantity} ELSE 0 END)
-        -
-        SUM(CASE WHEN ${transaction_items.direction} = 1 THEN ${transaction_items.quantity} ELSE 0 END)
-        > 0
-      `);
-
-    return c.json({
-      data: {
-        user_id: userId,
-        borrowed: borrowed.map((b) => ({
-          ...b,
-          borrowed: Number(b.borrowed),
-        })),
-      },
-    });
-  }
-);
 
 export { transactionRoutes };

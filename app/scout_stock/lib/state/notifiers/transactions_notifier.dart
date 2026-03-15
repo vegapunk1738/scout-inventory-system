@@ -53,6 +53,7 @@ class ReturnHistoryItem {
     required this.itemName,
     required this.itemEmoji,
     required this.bucketName,
+    required this.bucketBarcode,
     required this.quantity,
     required this.status,
   });
@@ -64,6 +65,7 @@ class ReturnHistoryItem {
   final String itemName;
   final String itemEmoji;
   final String bucketName;
+  final String bucketBarcode;
   final int quantity;
   final String status;
 
@@ -76,6 +78,7 @@ class ReturnHistoryItem {
       itemName: json['item_name'] as String,
       itemEmoji: json['item_emoji'] as String,
       bucketName: json['bucket_name'] as String,
+      bucketBarcode: json['bucket_barcode'] as String? ?? '',
       quantity: json['quantity'] as int,
       status: json['status'] as String? ?? 'normal',
     );
@@ -120,6 +123,9 @@ class TransactionsNotifier extends AsyncNotifier<MyTransactionsState> {
   }
 
   /// Checkout items from cart. Returns the transaction ID.
+  ///
+  /// IMPORTANT: Uses [Item.bucketId] (the UUID) for the API call,
+  /// NOT [Item.bucketBarcode] (the SSB-XXX-XXX display string).
   Future<String> checkout(List<Item> cartItems) async {
     final idempotencyKey = const Uuid().v4();
 
@@ -130,7 +136,7 @@ class TransactionsNotifier extends AsyncNotifier<MyTransactionsState> {
         'items': cartItems
             .map(
               (item) => {
-                'bucket_id': item.bucketBarcode,
+                'bucket_id': item.bucketId,       // ← UUID, not barcode
                 'item_type_id': item.id,
                 'quantity': item.quantity,
               },
@@ -148,7 +154,7 @@ class TransactionsNotifier extends AsyncNotifier<MyTransactionsState> {
     return txId;
   }
 
-  /// Return items. Each entry maps item_type_id → quantity to return.
+  /// Return items. Each entry must include bucket_id (UUID), item_type_id, quantity.
   Future<String> returnItems(List<Map<String, dynamic>> items) async {
     final idempotencyKey = const Uuid().v4();
 

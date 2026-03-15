@@ -2,6 +2,7 @@ class Item {
   const Item({
     required this.id,
     required this.name,
+    required this.bucketId,
     required this.bucketBarcode,
     required this.bucketName,
     required this.quantity,
@@ -9,10 +10,15 @@ class Item {
     required this.emoji,
   });
 
+  /// The item_type UUID from the backend.
   final String id;
 
   final String name;
 
+  /// The bucket UUID — used in API requests (checkout/return).
+  final String bucketId;
+
+  /// The bucket barcode (e.g. "SSB-TNT-912") — used for display only.
   final String bucketBarcode;
 
   final String bucketName;
@@ -26,6 +32,7 @@ class Item {
     String? id,
     String? name,
     String? bucketId,
+    String? bucketBarcode,
     String? bucketName,
     int? quantity,
     int? maxQuantity,
@@ -34,7 +41,8 @@ class Item {
     return Item(
       id: id ?? this.id,
       name: name ?? this.name,
-      bucketBarcode: bucketId ?? bucketBarcode,
+      bucketId: bucketId ?? this.bucketId,
+      bucketBarcode: bucketBarcode ?? this.bucketBarcode,
       bucketName: bucketName ?? this.bucketName,
       quantity: quantity ?? this.quantity,
       maxQuantity: maxQuantity ?? this.maxQuantity,
@@ -45,10 +53,12 @@ class Item {
   static String formatBucketId({
     required String bucketCode3,
     required int sequence,
-  }) => 'SSB-$bucketCode3-${sequence.toString().padLeft(3, '0')}';
+  }) =>
+      'SSB-$bucketCode3-${sequence.toString().padLeft(3, '0')}';
 
   static String formatItemId({
     required String itemCode3,
     required int sequence,
-  }) => 'SSI-$itemCode3-${sequence.toString().padLeft(3, '0')}';
+  }) =>
+      'SSI-$itemCode3-${sequence.toString().padLeft(3, '0')}';
 }

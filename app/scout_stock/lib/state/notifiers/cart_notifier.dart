@@ -1,11 +1,12 @@
-import 'dart:math';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:scout_stock/data/api/api_client.dart';
+import 'package:scout_stock/domain/models/item.dart';
+import 'package:scout_stock/state/providers/transactions_provider.dart';
 
-import 'package:riverpod/riverpod.dart';
-import '../../domain/models/item.dart';
+// ─── State ──────────────────────────────────────────────────────────────────
 
-class RemovedCartEntry {
-  const RemovedCartEntry({required this.item, required this.index});
-
+class _UndoEntry {
+  const _UndoEntry({required this.item, required this.index});
   final Item item;
   final int index;
 }
@@ -18,16 +19,17 @@ class CartState {
   });
 
   final List<Item> items;
-  final List<RemovedCartEntry> undoStack;
+  final List<_UndoEntry> undoStack;
   final bool checkingOut;
 
-  bool get canUndo => undoStack.isNotEmpty;
-  int get undoCount => undoStack.length;
   bool get isEmpty => items.isEmpty;
+  int get totalCount => items.fold<int>(0, (s, it) => s + it.quantity);
+  int get undoCount => undoStack.length;
+  bool get canUndo => undoStack.isNotEmpty;
 
   CartState copyWith({
     List<Item>? items,
-    List<RemovedCartEntry>? undoStack,
+    List<_UndoEntry>? undoStack,
     bool? checkingOut,
   }) {
     return CartState(
@@ -38,78 +40,39 @@ class CartState {
   }
 }
 
+// ─── Notifier ───────────────────────────────────────────────────────────────
+
 class CartNotifier extends Notifier<CartState> {
   @override
-  CartState build() {
-    return const CartState(items: [], undoStack: []);
-  }
+  CartState build() => const CartState(items: [], undoStack: []);
 
   void addItem(Item item) {
-    final items = state.items;
+    final items = [...state.items];
     final idx = items.indexWhere((x) => x.id == item.id);
 
-    if (idx == -1) {
-      final q = item.quantity.clamp(1, item.maxQuantity);
-      state = state.copyWith(
-        items: [
-          ...items,
-          item.copyWith(quantity: q),
-        ],
+    if (idx != -1) {
+      // Already in cart — update quantity (clamped to maxQuantity)
+      items[idx] = item.copyWith(
+        quantity: item.quantity.clamp(1, item.maxQuantity),
       );
-      return;
+    } else {
+      items.add(
+        item.copyWith(quantity: item.quantity.clamp(1, item.maxQuantity)),
+      );
     }
 
-    final current = items[idx];
-    final nextQty = (current.quantity + item.quantity).clamp(
-      1,
-      current.maxQuantity,
-    );
-
-    final updated = [...items];
-    updated[idx] = current.copyWith(quantity: nextQty);
-    state = state.copyWith(items: updated);
-  }
-
-  void increment(String itemId) {
-    final items = state.items;
-    final idx = items.indexWhere((x) => x.id == itemId);
-    if (idx == -1) return;
-
-    final item = items[idx];
-    if (item.quantity >= item.maxQuantity) return;
-
-    final updated = [...items];
-    updated[idx] = item.copyWith(quantity: item.quantity + 1);
-    state = state.copyWith(items: updated);
-  }
-
-  void decrement(String itemId) {
-    final items = state.items;
-    final idx = items.indexWhere((x) => x.id == itemId);
-    if (idx == -1) return;
-
-    final item = items[idx];
-    if (item.quantity <= 1) return;
-
-    final updated = [...items];
-    updated[idx] = item.copyWith(quantity: item.quantity - 1);
-    state = state.copyWith(items: updated);
+    state = state.copyWith(items: items);
   }
 
   void remove(String itemId) {
-    final items = state.items;
+    final items = [...state.items];
     final idx = items.indexWhere((x) => x.id == itemId);
     if (idx == -1) return;
 
-    final removed = items[idx];
+    final removed = items.removeAt(idx);
+    final undo = [...state.undoStack, _UndoEntry(item: removed, index: idx)];
 
-    final updatedItems = [...items]..removeAt(idx);
-    final updatedUndo = [
-      ...state.undoStack,
-      RemovedCartEntry(item: removed, index: idx),
-    ];
-
-    state = state.copyWith(items: updatedItems, undoStack: updatedUndo);
+    state = state.copyWith(items: items, undoStack: undo);
   }
 
   void undoRemove() {
@@ -117,7 +80,6 @@ class CartNotifier extends Notifier<CartState> {
 
     final undo = [...state.undoStack];
     final entry = undo.removeLast();
-
     final items = [...state.items];
 
     final existingIdx = items.indexWhere((x) => x.id == entry.item.id);
@@ -158,23 +120,50 @@ class CartNotifier extends Notifier<CartState> {
     state = state.copyWith(items: nextItems);
   }
 
-  /// Checkout — will be wired to the backend transactions API later.
-  /// For now, clears the cart and returns a local txn ID.
-  Future<({bool ok, String? txnId, String? error})> checkout() async {
-    if (state.checkingOut) return (ok: false, txnId: null, error: 'busy');
-    if (state.items.isEmpty) return (ok: false, txnId: null, error: 'empty');
+  /// Checkout via the real backend transactions API.
+  ///
+  /// Uses [TransactionsNotifier.checkout] which sends the cart items
+  /// with proper bucket_id (UUID) and item_type_id to the backend.
+  ///
+  /// Returns a record with:
+  /// - `ok`: whether checkout succeeded
+  /// - `txnId`: the backend transaction ID on success
+  /// - `error`: human-readable error message on failure
+  Future<({bool ok, String? txnId, String? error, List<Item> items})> checkout() async {
+    if (state.checkingOut) return (ok: false, txnId: null, error: 'busy', items: const <Item>[]);
+    if (state.items.isEmpty) return (ok: false, txnId: null, error: 'empty', items: const <Item>[]);
+
+    // Snapshot items before clearing — needed for the success dialog.
+    final checkedOutItems = List<Item>.unmodifiable(state.items);
 
     state = state.copyWith(checkingOut: true);
 
     try {
-      // TODO: Replace with real API call via transactionsProvider
-      await Future.delayed(const Duration(milliseconds: 500));
+      final txNotifier = ref.read(transactionsProvider.notifier);
+      final txnId = await txNotifier.checkout(state.items);
 
-      final txnId = '#TXN-${Random().nextInt(90000) + 10000}';
+      // Clear cart on success
       state = const CartState(items: [], undoStack: []);
-      return (ok: true, txnId: txnId, error: null);
+      return (ok: true, txnId: txnId, error: null, items: checkedOutItems);
+    } on ApiException catch (e) {
+      String errorMsg;
+
+      if (e.isConflict) {
+        // 409 — overborrowing or race condition
+        errorMsg = e.message;
+      } else if (e.isNotFound) {
+        // 404 — bucket or item deleted while in cart
+        errorMsg = 'Some items are no longer available. '
+            'Please clear your cart and scan again.';
+      } else if (e.isUnauthorized) {
+        errorMsg = 'Session expired. Please log in again.';
+      } else {
+        errorMsg = e.displayMessage;
+      }
+
+      return (ok: false, txnId: null, error: errorMsg, items: const <Item>[]);
     } catch (e) {
-      return (ok: false, txnId: null, error: '$e');
+      return (ok: false, txnId: null, error: '$e', items: const <Item>[]);
     } finally {
       state = state.copyWith(checkingOut: false);
     }

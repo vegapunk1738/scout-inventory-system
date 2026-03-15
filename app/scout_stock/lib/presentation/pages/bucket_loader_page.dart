@@ -96,13 +96,14 @@ class _BucketLoaderPageState extends ConsumerState<BucketLoaderPage> {
           final isNotFound = err is ApiException && err.isNotFound;
 
           final emoji = isNotFound ? '🔎' : '⚠️';
-          final title =
-              isNotFound ? 'Bucket not found' : 'Failed to load bucket';
+          final title = isNotFound
+              ? 'Bucket not found'
+              : 'Failed to load bucket';
           final subtitle = isNotFound
               ? 'No bucket matches barcode\n${widget.barcode}'
               : err is ApiException
-                  ? err.message
-                  : 'Something went wrong. Please try again.';
+              ? err.message
+              : 'Something went wrong. Please try again.';
 
           return Scaffold(
             backgroundColor: AppColors.background,
@@ -116,8 +117,7 @@ class _BucketLoaderPageState extends ConsumerState<BucketLoaderPage> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(emoji,
-                            style: emojiBase.copyWith(fontSize: 54)),
+                        Text(emoji, style: emojiBase.copyWith(fontSize: 54)),
                         const SizedBox(height: 14),
                         Text(
                           title,
@@ -127,8 +127,7 @@ class _BucketLoaderPageState extends ConsumerState<BucketLoaderPage> {
                         const SizedBox(height: 8),
                         Text(
                           subtitle,
-                          style: t.bodyLarge
-                              ?.copyWith(color: AppColors.muted),
+                          style: t.bodyLarge?.copyWith(color: AppColors.muted),
                           textAlign: TextAlign.center,
                         ),
                         if (!isNotFound) ...[
@@ -142,7 +141,8 @@ class _BucketLoaderPageState extends ConsumerState<BucketLoaderPage> {
                               foregroundColor: Colors.white,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(
-                                    tokens.radiusXl),
+                                  tokens.radiusXl,
+                                ),
                               ),
                             ),
                           ),
@@ -173,8 +173,7 @@ class _BucketLoaderPageState extends ConsumerState<BucketLoaderPage> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('🪣',
-                            style: emojiBase.copyWith(fontSize: 54)),
+                        Text('🪣', style: emojiBase.copyWith(fontSize: 54)),
                         const SizedBox(height: 14),
                         Text(
                           bucket.name,
@@ -192,8 +191,7 @@ class _BucketLoaderPageState extends ConsumerState<BucketLoaderPage> {
                         const SizedBox(height: 14),
                         Text(
                           'This bucket has no items yet.\nAsk an admin to add items first.',
-                          style: t.bodyLarge
-                              ?.copyWith(color: AppColors.muted),
+                          style: t.bodyLarge?.copyWith(color: AppColors.muted),
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -221,15 +219,18 @@ class _BucketLoaderPageState extends ConsumerState<BucketLoaderPage> {
 
         // Multiple items → BucketMixedItemsPage
         return BucketMixedItemsPage(
+          bucketId: bucket.id,
           bucketBarcode: bucket.barcode,
           bucketName: bucket.name,
           items: bucket.items
-              .map((i) => BucketCatalogItem(
-                    id: i.id,
-                    name: i.name,
-                    emoji: i.emoji,
-                    available: i.available,
-                  ))
+              .map(
+                (i) => BucketCatalogItem(
+                  id: i.id,
+                  name: i.name,
+                  emoji: i.emoji,
+                  available: i.available,
+                ),
+              )
               .toList(),
         );
       },

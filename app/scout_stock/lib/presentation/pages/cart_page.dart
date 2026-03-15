@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -22,14 +20,6 @@ class CartPage extends ConsumerStatefulWidget {
 
 class _CartPageState extends ConsumerState<CartPage> {
   bool _submitting = false;
-
-  Future<({bool ok, String? txnId, String? error})> _checkoutRequest() async {
-    await Future.delayed(const Duration(milliseconds: 650));
-
-    final ok = Random().nextBool();
-    if (ok) return (ok: true, txnId: '#CH-89204-X', error: null);
-    return (ok: false, txnId: null, error: 'E-CHK-500');
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -97,7 +87,7 @@ class _CartPageState extends ConsumerState<CartPage> {
                       listBottomPadding,
                     ),
                     itemCount: items.length,
-                    separatorBuilder: (_, _) =>
+                    separatorBuilder: (_, __) =>
                         SizedBox(height: compact ? 10 : 12),
                     addAutomaticKeepAlives: false,
                     addRepaintBoundaries: false,
@@ -157,16 +147,19 @@ class _CartPageState extends ConsumerState<CartPage> {
                   : () async {
                       setState(() => _submitting = true);
                       try {
-                        final res = await _checkoutRequest();
+                        // Real API checkout via CartNotifier
+                        final res = await ref
+                            .read(cartProvider.notifier)
+                            .checkout();
                         if (!mounted) return;
 
                         if (res.ok) {
                           await showCheckoutResultDialog(
                             context,
                             child: CheckoutResultDialog.success(
-                              transactionId: res.txnId!,
+                              items: res.items,
                               onFinish: () {
-                                ref.read(cartProvider.notifier).clear();
+                                // Cart already cleared by checkout()
                                 final idx = AdminShellScope.maybeOf(context);
                                 if (idx != null) idx.value = 0;
                               },
@@ -176,7 +169,7 @@ class _CartPageState extends ConsumerState<CartPage> {
                           await showCheckoutResultDialog(
                             context,
                             child: CheckoutResultDialog.failure(
-                              errorCode: res.error,
+                              errorMessage: res.error,
                               onRetry: () {},
                               onClose: () {},
                             ),
