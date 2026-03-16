@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:scout_stock/data/api/api_client.dart';
 
 import 'package:scout_stock/domain/models/managed_user.dart';
+import 'package:scout_stock/presentation/widgets/resolve_borrowed_helper.dart';
 import 'package:scout_stock/state/providers/api_provider.dart';
 
 /// Manages the admin user list.
@@ -35,6 +36,16 @@ class UsersNotifier extends AsyncNotifier<List<ManagedUser>> {
     return res['scout_id'] as String;
   }
 
+  Future<List<UserBorrowedItemInfo>> fetchUserBorrowed(String scoutId) async {
+    final response = await _api.get(
+      '/users/by-scout-id/$scoutId/borrowed-items',
+    );
+    final items = (response['data'] as List)
+        .map((e) => UserBorrowedItemInfo.fromJson(e as Map<String, dynamic>))
+        .toList();
+    return items;
+  }
+
   // ── Create ─────────────────────────────────────────────────────────────
 
   Future<ManagedUser> createUser({
@@ -43,12 +54,15 @@ class UsersNotifier extends AsyncNotifier<List<ManagedUser>> {
     required String password,
     required String role,
   }) async {
-    final res = await _api.post('/users', body: {
-      'scout_id': scoutId,
-      'full_name': fullName,
-      'password': password,
-      'role': role,
-    });
+    final res = await _api.post(
+      '/users',
+      body: {
+        'scout_id': scoutId,
+        'full_name': fullName,
+        'password': password,
+        'role': role,
+      },
+    );
 
     final created = ManagedUser.fromJson(res['data'] as Map<String, dynamic>);
     state = AsyncData([...state.requireValue, created]..sort(_byName));
@@ -106,8 +120,7 @@ class UsersNotifier extends AsyncNotifier<List<ManagedUser>> {
 
     await _api.delete('/users/$scoutId');
 
-    final list =
-        state.requireValue.where((u) => u.scoutId != scoutId).toList();
+    final list = state.requireValue.where((u) => u.scoutId != scoutId).toList();
     state = AsyncData(list);
   }
 

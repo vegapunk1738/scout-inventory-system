@@ -66,6 +66,45 @@ String _sectionTitle(DateTime d) {
   return isToday ? '$base (TODAY)' : base;
 }
 
+/// Builds the bucket info subtitle shown on borrowed/returned cards.
+/// Shows "(Deleted)" when the bucket has been soft-deleted.
+Widget _bucketInfoText({
+  required String bucketName,
+  required String bucketBarcode,
+  required bool bucketDeleted,
+  required TextStyle? baseStyle,
+  required bool compact,
+}) {
+  if (!bucketDeleted) {
+    return Text(
+      '$bucketName | $bucketBarcode',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: baseStyle,
+    );
+  }
+
+  // Deleted bucket — show name + red "(Deleted)" tag + barcode
+  return Text.rich(
+    TextSpan(
+      children: [
+        TextSpan(text: bucketName),
+        TextSpan(
+          text: ' (Deleted)',
+          style: baseStyle?.copyWith(
+            color: const Color(0xFFD92D20),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        TextSpan(text: ' | $bucketBarcode'),
+      ],
+    ),
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: baseStyle,
+  );
+}
+
 // ─── Page ───────────────────────────────────────────────────────────────────
 
 class MePage extends ConsumerWidget {
@@ -804,6 +843,13 @@ class _BorrowedCard extends StatelessWidget {
     final emojiSize = compact ? 22.0 : 26.0;
     final item = record.item;
 
+    final subtitleStyle = textTheme.bodyMedium?.copyWith(
+      color: AppColors.muted,
+      fontWeight: FontWeight.w700,
+      fontSize: compact ? 11.5 : 12,
+      height: 1.1,
+    );
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -847,16 +893,12 @@ class _BorrowedCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        '${item.bucketName} | ${item.bucketBarcode}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: textTheme.bodyMedium?.copyWith(
-                          color: AppColors.muted,
-                          fontWeight: FontWeight.w700,
-                          fontSize: compact ? 11.5 : 12,
-                          height: 1.1,
-                        ),
+                      _bucketInfoText(
+                        bucketName: item.bucketName,
+                        bucketBarcode: item.bucketBarcode,
+                        bucketDeleted: item.bucketDeleted,
+                        baseStyle: subtitleStyle,
+                        compact: compact,
                       ),
                     ],
                   ),
@@ -940,6 +982,13 @@ class _ReturnedCard extends StatelessWidget {
       statusIcon = Icons.check_circle_rounded;
     }
 
+    final subtitleStyle = textTheme.bodyMedium?.copyWith(
+      color: AppColors.muted.withValues(alpha: 0.85),
+      fontWeight: FontWeight.w700,
+      fontSize: compact ? 11.5 : 12,
+      height: 1.1,
+    );
+
     final base = Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -995,16 +1044,12 @@ class _ReturnedCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        '${item.bucketName} | ${item.bucketBarcode}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: textTheme.bodyMedium?.copyWith(
-                          color: AppColors.muted.withValues(alpha: 0.85),
-                          fontWeight: FontWeight.w700,
-                          fontSize: compact ? 11.5 : 12,
-                          height: 1.1,
-                        ),
+                      _bucketInfoText(
+                        bucketName: item.bucketName,
+                        bucketBarcode: item.bucketBarcode,
+                        bucketDeleted: item.bucketDeleted,
+                        baseStyle: subtitleStyle,
+                        compact: compact,
                       ),
                     ],
                   ),

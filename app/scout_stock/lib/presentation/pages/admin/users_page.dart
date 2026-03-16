@@ -9,13 +9,15 @@ import 'package:scout_stock/domain/models/managed_user.dart';
 import 'package:scout_stock/presentation/pages/admin/user_upsert_page.dart';
 import 'package:scout_stock/presentation/widgets/app_toast.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
+import 'package:scout_stock/presentation/widgets/resolve_borrowed_helper.dart';
 import 'package:scout_stock/router/app_routes.dart';
 import 'package:scout_stock/state/providers/auth_providers.dart';
+import 'package:scout_stock/state/providers/buckets_provider.dart';
 import 'package:scout_stock/state/providers/users_provider.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Users Admin Page — connected to backend via usersProvider
+// Users Admin Page
 // ═══════════════════════════════════════════════════════════════════════════
 
 class UsersAdminPage extends ConsumerStatefulWidget {
@@ -25,23 +27,56 @@ class UsersAdminPage extends ConsumerStatefulWidget {
   ConsumerState<UsersAdminPage> createState() => _UsersAdminPageState();
 }
 
-class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
+class _UsersAdminPageState extends ConsumerState<UsersAdminPage>
+    with WidgetsBindingObserver {
   final _searchCtrl = TextEditingController();
   String _query = '';
 
   final Map<String, ValueNotifier<bool>> _expanded = {};
 
+  /// Which user is currently being deleted (shows spinner on Delete button).
+  String? _deletingScoutId;
+
+  /// Tracks whether tickers are enabled (true = page is onstage/visible).
+  bool _tickerWasEnabled = true;
+
   ValueNotifier<bool> _exp(String id) =>
       _expanded.putIfAbsent(id, () => ValueNotifier<bool>(false));
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchCtrl.dispose();
     for (final n in _expanded.values) {
       n.dispose();
     }
     _expanded.clear();
     super.dispose();
+  }
+
+  // ── Refresh on app resume ──────────────────────────────────────────────
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ref.invalidate(usersProvider);
+    }
+  }
+
+  // ── Refresh on tab switch ──────────────────────────────────────────────
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final tickerEnabled = TickerMode.of(context);
+    if (tickerEnabled && !_tickerWasEnabled) {
+      ref.invalidate(usersProvider);
+    }
+    _tickerWasEnabled = tickerEnabled;
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────
@@ -58,9 +93,6 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
         .toList(growable: false);
   }
 
-  /// Shows error toasts. If the error has field-level validation details,
-  /// fires one toast per field so each is individually readable and
-  /// dismissible. Otherwise shows a single toast.
   void _showError(Object e, {required String action}) {
     if (!mounted) return;
     if (e is ApiException && e.hasFieldErrors) {
@@ -91,15 +123,6 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
 
   // ── Actions ────────────────────────────────────────────────────────────
 
-  /// ---------------------------------------------------------------
-  /// FIX: The create/edit callbacks now perform the API call
-  /// *before* the upsert page pops, via [UpsertCallbacks]. This
-  /// eliminates the race between GoRouter's pop-result delivery and
-  /// widget lifecycle. The upsert page calls the callback, awaits
-  /// the result, and only then pops — so the API call is guaranteed
-  /// to fire regardless of the parent's mounted state.
-  /// ---------------------------------------------------------------
-
   Future<void> _onAdd() async {
     String nextId = '';
     try {
@@ -107,8 +130,6 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
     } catch (_) {}
     if (!mounted) return;
 
-    // Store ref-based notifier before the async gap so we don't depend
-    // on `ref` being valid after the push returns.
     final notifier = ref.read(usersProvider.notifier);
 
     await context.push<void>(
@@ -128,8 +149,6 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
             role: role,
           );
 
-          // Toast is fire-and-forget; safe to check mounted here because
-          // the upsert page is still on screen (it hasn't popped yet).
           if (mounted) {
             final roleLabel = role == 'admin' ? 'Admin' : 'Scout';
             AppToast.of(context).show(
@@ -175,7 +194,6 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
             password: pwChanged ? newPassword : null,
           );
 
-          // Build toast info.
           final changes = <String>[];
           if (nameChanged) changes.add('${user.fullName} → $newName');
           if (roleChanged) {
@@ -187,7 +205,6 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
 
           final displayName = nameChanged ? newName : user.fullName;
 
-          // Refresh JWT if the admin edited themselves.
           final currentUser = ref.read(currentUserProvider);
           final editedSelf =
               currentUser != null && currentUser.scoutId == user.scoutId;
@@ -212,59 +229,167 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
 
   Future<void> _onDelete(ManagedUser user) async {
     if (user.isSuperAdmin) return;
+    if (_deletingScoutId != null) return;
+
+    final usersNotifier = ref.read(usersProvider.notifier);
+    final bucketsNotifier = ref.read(bucketsProvider.notifier);
 
     final currentUser = ref.read(currentUserProvider);
     final isDeletingSelf =
         currentUser != null && currentUser.scoutId == user.scoutId;
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(
-          isDeletingSelf
-              ? 'Delete your own account?'
-              : 'Delete ${user.fullName}?',
-        ),
-        content: Text(
-          isDeletingSelf
-              ? 'You will be logged out immediately and will not be able to sign back in.'
-              : 'This action cannot be undone. The user will lose access immediately.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(isDeletingSelf ? 'Delete & Log Out' : 'Delete'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
+    // ── 1. Fetch user's borrowed items (shows spinner) ───────────────
+    setState(() => _deletingScoutId = user.scoutId);
 
+    List<UserBorrowedItemInfo> borrowedItems;
     try {
-      await ref.read(usersProvider.notifier).deleteUser(user.scoutId);
-
-      if (isDeletingSelf) {
-        await ref.read(authControllerProvider.notifier).logout();
-        return;
-      }
-
+      borrowedItems = await usersNotifier.fetchUserBorrowed(user.scoutId);
+    } catch (e) {
+      if (mounted) setState(() => _deletingScoutId = null);
       if (!mounted) return;
-      final roleLabel = user.role.isAdmin ? 'Admin' : 'Scout';
-      AppToast.of(context).show(
-        AppToastData.success(
-          title: 'Deleted: ${user.fullName}',
-          subtitle: '$roleLabel #${user.scoutId} deleted from the team',
+      _showError(e, action: 'Could not check borrowed items');
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() => _deletingScoutId = null);
+
+    final hasBorrowed = borrowedItems.isNotEmpty;
+
+    // ── 2. Confirmation dialog ───────────────────────────────────────
+    if (hasBorrowed) {
+      final totalBorrowed =
+          borrowedItems.fold<int>(0, (s, i) => s + i.borrowed);
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Resolve borrowed items'),
+          content: Text(
+            '${user.fullName} currently has $totalBorrowed borrowed '
+            'item${totalBorrowed != 1 ? 's' : ''}.\n\n'
+            'You need to resolve what happened to each borrowed item '
+            'before this account can be deleted.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFDC6803),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Resolve & Delete'),
+            ),
+          ],
         ),
       );
-    } catch (e) {
-      if (!mounted) return;
-      _showError(e, action: 'Could not delete ${user.fullName}');
+
+      if (ok != true || !mounted) return;
+
+      // ── 3. Resolution sheet ──────────────────────────────────────
+      try {
+        setState(() => _deletingScoutId = user.scoutId);
+
+        final allResolved = await resolveUserBorrowedItems(
+          context: context,
+          userId: user.id,
+          userName: user.fullName,
+          userScoutId: user.scoutId,
+          borrowedItems: borrowedItems,
+          bucketsNotifier: bucketsNotifier,
+        );
+
+        if (!allResolved || !mounted) {
+          if (mounted) setState(() => _deletingScoutId = null);
+          return;
+        }
+
+        // ── 4. Soft-delete user ──────────────────────────────────────
+        await usersNotifier.deleteUser(user.scoutId);
+
+        if (isDeletingSelf) {
+          await ref.read(authControllerProvider.notifier).logout();
+          return;
+        }
+
+        if (!mounted) return;
+        setState(() => _deletingScoutId = null);
+
+        final roleLabel = user.role.isAdmin ? 'Admin' : 'Scout';
+        AppToast.of(context).show(
+          AppToastData.success(
+            title: 'Deleted: ${user.fullName}',
+            subtitle:
+                '$roleLabel #${user.scoutId} deleted  ·  Borrowed items resolved',
+          ),
+        );
+      } catch (e) {
+        if (mounted) setState(() => _deletingScoutId = null);
+        if (!mounted) return;
+        _showError(e, action: 'Could not delete ${user.fullName}');
+      }
+    } else {
+      // ── No borrowed items — simple delete flow ─────────────────────
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(
+            isDeletingSelf
+                ? 'Delete your own account?'
+                : 'Delete ${user.fullName}?',
+          ),
+          content: Text(
+            isDeletingSelf
+                ? 'You will be logged out immediately and will not be able to sign back in.'
+                : 'This action cannot be undone. The user will lose access immediately.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.red.shade700,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(isDeletingSelf ? 'Delete & Log Out' : 'Delete'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+
+      try {
+        setState(() => _deletingScoutId = user.scoutId);
+        await usersNotifier.deleteUser(user.scoutId);
+
+        if (isDeletingSelf) {
+          await ref.read(authControllerProvider.notifier).logout();
+          return;
+        }
+
+        if (!mounted) return;
+        setState(() => _deletingScoutId = null);
+
+        final roleLabel = user.role.isAdmin ? 'Admin' : 'Scout';
+        AppToast.of(context).show(
+          AppToastData.success(
+            title: 'Deleted: ${user.fullName}',
+            subtitle: '$roleLabel #${user.scoutId} is deleted',
+          ),
+        );
+      } catch (e) {
+        if (mounted) setState(() => _deletingScoutId = null);
+        if (!mounted) return;
+        _showError(e, action: 'Could not delete ${user.fullName}');
+      }
     }
+
+    if (mounted) ref.invalidate(usersProvider);
   }
 
   // ── Build ──────────────────────────────────────────────────────────────
@@ -301,16 +426,10 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
                     children: [
                       Text('😵', style: emojiBase.copyWith(fontSize: 54)),
                       const SizedBox(height: 12),
-                      Text(
-                        'Failed to load users',
-                        style: t.titleLarge,
-                        textAlign: TextAlign.center,
-                      ),
+                      Text('Failed to load users', style: t.titleLarge, textAlign: TextAlign.center),
                       const SizedBox(height: 8),
                       Text(
-                        err is ApiException
-                            ? err.displayMessage
-                            : 'Something went wrong. Please try again.',
+                        err is ApiException ? err.displayMessage : 'Something went wrong. Please try again.',
                         style: t.bodyLarge?.copyWith(color: AppColors.muted),
                         textAlign: TextAlign.center,
                       ),
@@ -327,9 +446,7 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
 
               data: (allUsers) {
                 final items = _filterAndSort(allUsers);
-                final scoutCount = allUsers
-                    .where((u) => !u.role.isAdmin)
-                    .length;
+                final scoutCount = allUsers.where((u) => !u.role.isAdmin).length;
                 final adminCount = allUsers.where((u) => u.role.isAdmin).length;
                 final isEmpty = items.isEmpty;
 
@@ -345,12 +462,7 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
                     slivers: [
                       SliverToBoxAdapter(
                         child: Padding(
-                          padding: EdgeInsets.fromLTRB(
-                            20,
-                            mediaTop + 10,
-                            20,
-                            0,
-                          ),
+                          padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
                           child: _UsersHeader(
                             onAdd: _onAdd,
                             onRefresh: () async {
@@ -360,7 +472,6 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
                           ),
                         ),
                       ),
-
                       SliverPersistentHeader(
                         pinned: true,
                         delegate: _StickyHeaderDelegate(
@@ -375,41 +486,23 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
                           ),
                         ),
                       ),
-
                       SliverToBoxAdapter(
                         child: Padding(
                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                          child: _StatsRow(
-                            scoutCount: scoutCount,
-                            adminCount: adminCount,
-                          ),
+                          child: _StatsRow(scoutCount: scoutCount, adminCount: adminCount),
                         ),
                       ),
-
                       SliverToBoxAdapter(
                         child: Padding(
                           padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                           child: Row(
                             children: [
-                              Expanded(
-                                child: Text(
-                                  'ALL USERS',
-                                  style: t.labelMedium?.copyWith(
-                                    color: AppColors.muted,
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                'ROLE',
-                                style: t.labelMedium?.copyWith(
-                                  color: AppColors.muted,
-                                ),
-                              ),
+                              Expanded(child: Text('ALL USERS', style: t.labelMedium?.copyWith(color: AppColors.muted))),
+                              Text('ROLE', style: t.labelMedium?.copyWith(color: AppColors.muted)),
                             ],
                           ),
                         ),
                       ),
-
                       if (isEmpty)
                         SliverFillRemaining(
                           hasScrollBody: false,
@@ -419,24 +512,11 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text(
-                                    '🫂',
-                                    style: emojiBase.copyWith(fontSize: 54),
-                                  ),
+                                  Text('🫂', style: emojiBase.copyWith(fontSize: 54)),
                                   const SizedBox(height: 10),
-                                  Text(
-                                    'No users found',
-                                    style: t.titleLarge,
-                                    textAlign: TextAlign.center,
-                                  ),
+                                  Text('No users found', style: t.titleLarge, textAlign: TextAlign.center),
                                   const SizedBox(height: 8),
-                                  Text(
-                                    'Try a different name or Scout ID',
-                                    style: t.bodyLarge?.copyWith(
-                                      color: AppColors.muted,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
+                                  Text('Try a different name or Scout ID', style: t.bodyLarge?.copyWith(color: AppColors.muted), textAlign: TextAlign.center),
                                 ],
                               ),
                             ),
@@ -456,6 +536,7 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
                                       user: user,
                                       expanded: _exp(user.scoutId),
                                       radiusXl: tokens.radiusXl,
+                                      deleteLoading: _deletingScoutId == user.scoutId,
                                       onEdit: () => _onEdit(user),
                                       onDelete: () => _onDelete(user),
                                     ),
@@ -469,23 +550,16 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
                             ),
                           ),
                         ),
-
                       SliverToBoxAdapter(
                         child: Padding(
                           padding: const EdgeInsets.fromLTRB(20, 10, 20, 8),
                           child: Text(
                             '${allUsers.length} Total Users',
-                            style: t.titleMedium?.copyWith(
-                              color: AppColors.muted,
-                              fontWeight: FontWeight.w800,
-                            ),
+                            style: t.titleMedium?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w800),
                           ),
                         ),
                       ),
-
-                      SliverToBoxAdapter(
-                        child: SizedBox(height: bottomFootprint),
-                      ),
+                      SliverToBoxAdapter(child: SizedBox(height: bottomFootprint)),
                     ],
                   ),
                 );
@@ -504,7 +578,6 @@ class _UsersAdminPageState extends ConsumerState<UsersAdminPage> {
 
 class _UsersHeader extends StatefulWidget {
   const _UsersHeader({required this.onAdd, required this.onRefresh});
-
   final VoidCallback onAdd;
   final Future<void> Function() onRefresh;
 
@@ -529,7 +602,6 @@ class _UsersHeaderState extends State<_UsersHeader> {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
-
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -537,60 +609,32 @@ class _UsersHeaderState extends State<_UsersHeader> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Team Members', style: t.titleLarge),
+              Text('Users Management', style: t.titleLarge),
               const SizedBox(height: 4),
-              Text(
-                'ADMIN VIEW',
-                style: t.labelMedium?.copyWith(
-                  color: AppColors.primary,
-                  letterSpacing: 1.8,
-                ),
-              ),
+              Text('ADMIN VIEW', style: t.labelMedium?.copyWith(color: AppColors.primary, letterSpacing: 1.8)),
             ],
           ),
         ),
         const SizedBox(width: 10),
         SizedBox(
-          width: 42,
-          height: 42,
+          width: 42, height: 42,
           child: _refreshing
-              ? const Padding(
-                  padding: EdgeInsets.all(10),
-                  child: CircularProgressIndicator(strokeWidth: 2.5),
-                )
+              ? const Padding(padding: EdgeInsets.all(10), child: CircularProgressIndicator(strokeWidth: 2.5))
               : IconButton(
-                  onPressed: _handleRefresh,
-                  icon: const Icon(Icons.refresh_rounded),
-                  color: AppColors.muted,
-                  splashRadius: 28,
-                  tooltip: 'Refresh',
-                  style: IconButton.styleFrom(
-                    splashFactory: NoSplash.splashFactory,
-                    hoverColor: Colors.transparent,
-                    highlightColor: Colors.transparent,
-                  ),
+                  onPressed: _handleRefresh, icon: const Icon(Icons.refresh_rounded), color: AppColors.muted,
+                  splashRadius: 28, tooltip: 'Refresh',
+                  style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory, hoverColor: Colors.transparent, highlightColor: Colors.transparent),
                 ),
         ),
         const SizedBox(width: 6),
         DecoratedBox(
-          decoration: BoxDecoration(
-            color: AppColors.primary,
-            shape: BoxShape.circle,
-            boxShadow: tokens.glowShadow,
-          ),
+          decoration: BoxDecoration(color: AppColors.primary, shape: BoxShape.circle, boxShadow: tokens.glowShadow),
           child: SizedBox(
-            width: 42,
-            height: 42,
+            width: 42, height: 42,
             child: IconButton(
-              onPressed: widget.onAdd,
-              icon: const Icon(Icons.add_rounded, color: Colors.white),
-              splashRadius: 28,
-              tooltip: 'Add user',
-              style: IconButton.styleFrom(
-                splashFactory: NoSplash.splashFactory,
-                hoverColor: Colors.transparent,
-                highlightColor: Colors.transparent,
-              ),
+              onPressed: widget.onAdd, icon: const Icon(Icons.add_rounded, color: Colors.white),
+              splashRadius: 28, tooltip: 'Add user',
+              style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory, hoverColor: Colors.transparent, highlightColor: Colors.transparent),
             ),
           ),
         ),
@@ -601,83 +645,36 @@ class _UsersHeaderState extends State<_UsersHeader> {
 
 class _StatsRow extends StatelessWidget {
   const _StatsRow({required this.scoutCount, required this.adminCount});
-
-  final int scoutCount;
-  final int adminCount;
+  final int scoutCount, adminCount;
 
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final t = Theme.of(context).textTheme;
 
-    Widget card({
-      required String numberText,
-      required String label,
-      required Color bg,
-      required Color numberColor,
-      required BorderSide? border,
-    }) {
+    Widget card({required String numberText, required String label, required Color bg, required Color numberColor, required BorderSide? border}) {
       return Container(
         height: 88,
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(tokens.radiusXl),
-          border: border == null ? null : Border.fromBorderSide(border),
-          boxShadow: tokens.cardShadow,
-        ),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(tokens.radiusXl), border: border == null ? null : Border.fromBorderSide(border), boxShadow: tokens.cardShadow),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        child: Column(
-          children: [
-            Text(
-              numberText,
-              style: t.headlineMedium?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: numberColor,
-                letterSpacing: -0.4,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(label, style: t.labelMedium?.copyWith(color: AppColors.muted)),
-          ],
-        ),
+        child: Column(children: [
+          Text(numberText, style: t.headlineMedium?.copyWith(fontWeight: FontWeight.w900, color: numberColor, letterSpacing: -0.4)),
+          const SizedBox(height: 4),
+          Text(label, style: t.labelMedium?.copyWith(color: AppColors.muted)),
+        ]),
       );
     }
 
-    return Row(
-      children: [
-        Expanded(
-          child: card(
-            numberText: scoutCount.toString().padLeft(2, '0'),
-            label: 'ACTIVE SCOUTS',
-            bg: Colors.white,
-            numberColor: AppColors.ink,
-            border: const BorderSide(color: AppColors.outline),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: card(
-            numberText: adminCount.toString().padLeft(2, '0'),
-            label: 'ADMINS',
-            bg: AppColors.successBg,
-            numberColor: AppColors.primary,
-            border: BorderSide(
-              color: AppColors.primary.withValues(alpha: 0.12),
-            ),
-          ),
-        ),
-      ],
-    );
+    return Row(children: [
+      Expanded(child: card(numberText: scoutCount.toString().padLeft(2, '0'), label: 'ACTIVE SCOUTS', bg: Colors.white, numberColor: AppColors.ink, border: const BorderSide(color: AppColors.outline))),
+      const SizedBox(width: 12),
+      Expanded(child: card(numberText: adminCount.toString().padLeft(2, '0'), label: 'ADMINS', bg: AppColors.successBg, numberColor: AppColors.primary, border: BorderSide(color: AppColors.primary.withValues(alpha: 0.12)))),
+    ]);
   }
 }
 
 class _SearchCard extends StatelessWidget {
-  const _SearchCard({
-    required this.controller,
-    required this.onChanged,
-    required this.hintText,
-  });
-
+  const _SearchCard({required this.controller, required this.onChanged, required this.hintText});
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
   final String hintText;
@@ -686,219 +683,116 @@ class _SearchCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
-
     return Theme(
-      data: Theme.of(context).copyWith(
-        hoverColor: Colors.transparent,
-        splashColor: Colors.transparent,
-        highlightColor: Colors.transparent,
-      ),
+      data: Theme.of(context).copyWith(hoverColor: Colors.transparent, splashColor: Colors.transparent, highlightColor: Colors.transparent),
       child: Container(
         height: 56,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(tokens.radiusLg),
-          boxShadow: tokens.cardShadow,
-        ),
-        child: Row(
-          children: [
-            const SizedBox(width: 16),
-            const Icon(Icons.search_rounded, color: AppColors.muted),
-            const SizedBox(width: 10),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                onChanged: onChanged,
-                textInputAction: TextInputAction.search,
-                style: t.bodyLarge?.copyWith(
-                  color: AppColors.ink,
-                  fontWeight: FontWeight.w600,
-                ),
-                decoration: InputDecoration(
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.only(right: 16),
-                  hintText: hintText,
-                  hintStyle: t.bodyLarge?.copyWith(
-                    color: const Color(0xFFB9C0C8),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(tokens.radiusLg), boxShadow: tokens.cardShadow),
+        child: Row(children: [
+          const SizedBox(width: 16),
+          const Icon(Icons.search_rounded, color: AppColors.muted),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              controller: controller, onChanged: onChanged, textInputAction: TextInputAction.search,
+              style: t.bodyLarge?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w600),
+              decoration: InputDecoration(
+                border: InputBorder.none, enabledBorder: InputBorder.none, focusedBorder: InputBorder.none, isDense: true,
+                contentPadding: const EdgeInsets.only(right: 16), hintText: hintText,
+                hintStyle: t.bodyLarge?.copyWith(color: const Color(0xFFB9C0C8), fontWeight: FontWeight.w700),
               ),
             ),
-            if (controller.text.isNotEmpty)
-              IconButton(
-                onPressed: () {
-                  controller.clear();
-                  onChanged('');
-                },
-                icon: const Icon(Icons.close_rounded),
-                splashRadius: 20,
-                tooltip: 'Clear',
-                style: IconButton.styleFrom(
-                  splashFactory: NoSplash.splashFactory,
-                  hoverColor: Colors.transparent,
-                  highlightColor: Colors.transparent,
-                ),
-              ),
-            const SizedBox(width: 6),
-          ],
-        ),
+          ),
+          if (controller.text.isNotEmpty)
+            IconButton(
+              onPressed: () { controller.clear(); onChanged(''); },
+              icon: const Icon(Icons.close_rounded), splashRadius: 20, tooltip: 'Clear',
+              style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory, hoverColor: Colors.transparent, highlightColor: Colors.transparent),
+            ),
+          const SizedBox(width: 6),
+        ]),
       ),
     );
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Expandable member card — Edit + Delete (red)
+// Expandable member card
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _ExpandableMemberCard extends StatelessWidget {
   const _ExpandableMemberCard({
-    required this.user,
-    required this.expanded,
-    required this.radiusXl,
-    required this.onEdit,
-    required this.onDelete,
+    required this.user, required this.expanded, required this.radiusXl,
+    required this.deleteLoading, required this.onEdit, required this.onDelete,
   });
 
   final ManagedUser user;
   final ValueNotifier<bool> expanded;
   final double radiusXl;
-
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
+  final bool deleteLoading;
+  final VoidCallback onEdit, onDelete;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-
     final isAdmin = user.role.isAdmin;
     final isSuperAdmin = user.isSuperAdmin;
     final initials = _initials(user.fullName);
 
-    final nameStyle = t.titleMedium?.copyWith(
-      fontSize: 17,
-      fontWeight: FontWeight.w800,
-      color: AppColors.ink,
-    );
+    final nameStyle = t.titleMedium?.copyWith(fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink);
+    final subtitleStyle = t.bodyMedium?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w600);
 
-    final subtitleStyle = t.bodyMedium?.copyWith(
-      color: AppColors.muted,
-      fontWeight: FontWeight.w600,
-    );
-
-    final stripColor = isSuperAdmin
-        ? const Color(0xFFFFB300)
-        : isAdmin
-        ? AppColors.primary
-        : const Color(0xFFE1E6ED);
+    final stripColor = isSuperAdmin ? const Color(0xFFFFB300) : isAdmin ? AppColors.primary : const Color(0xFFE1E6ED);
 
     return ValueListenableBuilder<bool>(
       valueListenable: expanded,
       builder: (context, isOpen, _) {
         return Material(
-          color: Colors.white,
-          elevation: 2,
-          shadowColor: const Color(0x14000000),
-          borderRadius: BorderRadius.circular(radiusXl),
-          clipBehavior: Clip.antiAlias,
+          color: Colors.white, elevation: 2, shadowColor: const Color(0x14000000),
+          borderRadius: BorderRadius.circular(radiusXl), clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: () => expanded.value = !expanded.value,
-            splashFactory: NoSplash.splashFactory,
-            hoverColor: Colors.transparent,
-            highlightColor: Colors.transparent,
-            child: Column(
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(width: 6, height: 84, color: stripColor),
-                    const SizedBox(width: 14),
-                    Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        CircleAvatar(
-                          radius: 22,
-                          backgroundColor: AppColors.background,
-                          child: Text(
-                            initials,
-                            style: t.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        if (isSuperAdmin)
-                          const Positioned(
-                            right: -4,
-                            bottom: -2,
-                            child: Icon(
-                              Icons.shield_rounded,
-                              size: 16,
-                              color: Color(0xFFFFB300),
-                            ),
-                          ),
-                      ],
+            splashFactory: NoSplash.splashFactory, hoverColor: Colors.transparent, highlightColor: Colors.transparent,
+            child: Column(children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(width: 6, height: 84, color: stripColor),
+                  const SizedBox(width: 14),
+                  Stack(clipBehavior: Clip.none, children: [
+                    CircleAvatar(radius: 22, backgroundColor: AppColors.background, child: Text(initials, style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800))),
+                    if (isSuperAdmin) const Positioned(right: -4, bottom: -2, child: Icon(Icons.shield_rounded, size: 16, color: Color(0xFFFFB300))),
+                  ]),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(user.fullName, maxLines: 1, overflow: TextOverflow.ellipsis, style: nameStyle),
+                        const SizedBox(height: 4),
+                        Text('ID: #${user.scoutId}', maxLines: 1, overflow: TextOverflow.ellipsis, style: subtitleStyle),
+                      ]),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              user.fullName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: nameStyle,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'ID: #${user.scoutId}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: subtitleStyle,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(right: 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          _RoleChip(
-                            role: user.role,
-                            isSuperAdmin: isSuperAdmin,
-                          ),
-                          const SizedBox(height: 8),
-                          Icon(
-                            isOpen
-                                ? Icons.keyboard_arrow_up_rounded
-                                : Icons.keyboard_arrow_down_rounded,
-                            color: AppColors.muted,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                AnimatedCrossFade(
-                  crossFadeState: isOpen
-                      ? CrossFadeState.showSecond
-                      : CrossFadeState.showFirst,
-                  duration: const Duration(milliseconds: 160),
-                  firstChild: const SizedBox.shrink(),
-                  secondChild: isSuperAdmin
-                      ? const _ProtectedDetailsBlock()
-                      : _MemberDetailsBlock(onEdit: onEdit, onDelete: onDelete),
-                ),
-              ],
-            ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                      _RoleChip(role: user.role, isSuperAdmin: isSuperAdmin),
+                      const SizedBox(height: 8),
+                      Icon(isOpen ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded, color: AppColors.muted),
+                    ]),
+                  ),
+                ],
+              ),
+              AnimatedCrossFade(
+                crossFadeState: isOpen ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                duration: const Duration(milliseconds: 160),
+                firstChild: const SizedBox.shrink(),
+                secondChild: isSuperAdmin
+                    ? const _ProtectedDetailsBlock()
+                    : _MemberDetailsBlock(onEdit: onEdit, onDelete: onDelete, deleteLoading: deleteLoading),
+              ),
+            ]),
           ),
         );
       },
@@ -912,85 +806,55 @@ class _ProtectedDetailsBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: AppColors.outline)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.lock_rounded, size: 18, color: AppColors.muted),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Super Admin — this account cannot be edited or deleted.',
-              style: t.bodyMedium?.copyWith(
-                color: AppColors.muted,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
+      decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: AppColors.outline))),
+      child: Row(children: [
+        const Icon(Icons.lock_rounded, size: 18, color: AppColors.muted),
+        const SizedBox(width: 10),
+        Expanded(child: Text('Super Admin — this account cannot be edited or deleted.', style: t.bodyMedium?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w600))),
+      ]),
     );
   }
 }
 
 class _MemberDetailsBlock extends StatelessWidget {
-  const _MemberDetailsBlock({required this.onEdit, required this.onDelete});
-
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
+  const _MemberDetailsBlock({required this.onEdit, required this.onDelete, this.deleteLoading = false});
+  final VoidCallback onEdit, onDelete;
+  final bool deleteLoading;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: AppColors.outline)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: onEdit,
-              icon: const Icon(Icons.edit_rounded),
-              label: const Text('Edit'),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(46),
-                textStyle: t.titleMedium?.copyWith(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
+      decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: AppColors.outline))),
+      child: Row(children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: onEdit,
+            icon: const Icon(Icons.edit_rounded),
+            label: const Text('Edit'),
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46), textStyle: t.titleMedium?.copyWith(fontSize: 14, fontWeight: FontWeight.w800)),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: deleteLoading ? null : onDelete,
+            icon: deleteLoading
+                ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.red.shade700))
+                : const Icon(Icons.delete_outline_rounded),
+            label: const Text('Delete'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.red.shade700, side: BorderSide(color: Colors.red.shade200),
+              minimumSize: const Size.fromHeight(46), textStyle: t.titleMedium?.copyWith(fontSize: 14, fontWeight: FontWeight.w800),
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: onDelete,
-              icon: const Icon(Icons.delete_outline_rounded),
-              label: const Text('Delete'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.red.shade700,
-                side: BorderSide(color: Colors.red.shade200),
-                minimumSize: const Size.fromHeight(46),
-                textStyle: t.titleMedium?.copyWith(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
 }
@@ -1004,70 +868,33 @@ class _RoleChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final isAdmin = role.isAdmin;
-
-    final bg = isSuperAdmin
-        ? const Color(0xFFFFF3D0)
-        : isAdmin
-        ? AppColors.primary
-        : Colors.white;
-    final fg = isSuperAdmin
-        ? const Color(0xFF8B6914)
-        : isAdmin
-        ? Colors.white
-        : AppColors.muted;
+    final bg = isSuperAdmin ? const Color(0xFFFFF3D0) : isAdmin ? AppColors.primary : Colors.white;
+    final fg = isSuperAdmin ? const Color(0xFF8B6914) : isAdmin ? Colors.white : AppColors.muted;
     final label = isSuperAdmin ? 'OWNER' : (isAdmin ? 'ADMIN' : 'SCOUT');
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-        border: isSuperAdmin
-            ? Border.all(color: const Color(0xFFFFB300))
-            : isAdmin
-            ? null
-            : Border.all(color: AppColors.outline),
+        color: bg, borderRadius: BorderRadius.circular(999),
+        border: isSuperAdmin ? Border.all(color: const Color(0xFFFFB300)) : isAdmin ? null : Border.all(color: AppColors.outline),
       ),
-      child: Text(
-        label,
-        style: t.labelMedium?.copyWith(color: fg, letterSpacing: 1.4),
-      ),
+      child: Text(label, style: t.labelMedium?.copyWith(color: fg, letterSpacing: 1.4)),
     );
   }
 }
 
 class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   _StickyHeaderDelegate({required this.height, required this.child});
-
   final double height;
   final Widget child;
-
-  @override
-  double get minExtent => height;
-  @override
-  double get maxExtent => height;
-
-  @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
-    return child;
-  }
-
-  @override
-  bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) {
-    return oldDelegate.height != height || oldDelegate.child != child;
-  }
+  @override double get minExtent => height;
+  @override double get maxExtent => height;
+  @override Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) => child;
+  @override bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) => oldDelegate.height != height || oldDelegate.child != child;
 }
 
 String _initials(String name) {
   final parts = name.trim().split(RegExp(r'\s+'));
   if (parts.isEmpty) return '?';
-  if (parts.length == 1) {
-    return parts.first.characters.take(2).toString().toUpperCase();
-  }
-  return '${parts.first.characters.first}${parts.last.characters.first}'
-      .toUpperCase();
+  if (parts.length == 1) return parts.first.characters.take(2).toString().toUpperCase();
+  return '${parts.first.characters.first}${parts.last.characters.first}'.toUpperCase();
 }

@@ -843,7 +843,7 @@ class _ContentItemCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       needsResolution
-                          ? '$excess item${excess != 1 ? 's' : ''} will need resolving on save'
+                          ? '${excess}x of this item will need resolving on save'
                           : '${item.borrowed}x currently borrowed',
                       style: textTheme.bodySmall?.copyWith(
                         color: needsResolution

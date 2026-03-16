@@ -3,7 +3,6 @@ import 'package:scout_stock/data/api/api_client.dart';
 import 'package:scout_stock/domain/models/item.dart';
 import 'package:scout_stock/state/providers/api_provider.dart';
 import 'package:scout_stock/state/providers/me_provider.dart';
-import 'package:scout_stock/state/providers/transactions_provider.dart';
 import 'package:uuid/uuid.dart';
 
 // ─── Models ─────────────────────────────────────────────────────────────────

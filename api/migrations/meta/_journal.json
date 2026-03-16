@@ -15,6 +15,20 @@
       "when": 1773204391335,
       "tag": "0001_slow_black_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1773698618398,
+      "tag": "0002_blushing_loki",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1773700545661,
+      "tag": "0003_sudden_timeslip",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -21,8 +22,18 @@ String _formatCreatedAt(String isoString) {
   final dt = DateTime.parse(isoString).toLocal();
 
   const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
 
   final month = months[dt.month - 1];
@@ -63,7 +74,8 @@ class BucketManagementAdminPage extends ConsumerStatefulWidget {
 }
 
 class _BucketManagementAdminPageState
-    extends ConsumerState<BucketManagementAdminPage> {
+    extends ConsumerState<BucketManagementAdminPage>
+    with WidgetsBindingObserver {
   static final PdfPageFormat _labelFormat = PdfPageFormat(
     4 * PdfPageFormat.inch,
     2 * PdfPageFormat.inch,
@@ -77,10 +89,48 @@ class _BucketManagementAdminPageState
   /// Which bucket is currently being fetched for editing (shows spinner).
   String? _loadingBucketId;
 
+  /// Which bucket is currently being fetched/deleted (shows spinner on Delete).
+  String? _deletingBucketId;
+
+  /// Tracks whether tickers are enabled (true = page is onstage/visible).
+  /// GoRouter's StatefulShellRoute wraps inactive branches in
+  /// Offstage → TickerMode(enabled: false), so this flips on tab switch.
+  bool _tickerWasEnabled = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  // ── Refresh on app resume ──────────────────────────────────────────────
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ref.invalidate(bucketsProvider);
+    }
+  }
+
+  // ── Refresh on tab switch ──────────────────────────────────────────────
+  // TickerMode.of(context) is an InheritedWidget that returns false when
+  // the widget sits inside an Offstage branch (inactive tab) and true
+  // when visible. Because it's inherited, didChangeDependencies fires
+  // whenever it flips — giving us a reliable "tab became active" signal.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final tickerEnabled = TickerMode.of(context);
+    if (tickerEnabled && !_tickerWasEnabled) {
+      ref.invalidate(bucketsProvider);
+    }
+    _tickerWasEnabled = tickerEnabled;
   }
 
   void _showError(Object e, {required String action}) {
@@ -88,11 +138,13 @@ class _BucketManagementAdminPageState
     if (e is ApiException && e.hasFieldErrors) {
       final toast = AppToast.of(context);
       for (final fe in e.fieldErrors) {
-        toast.show(AppToastData.error(
-          title: fe.label,
-          subtitle: fe.message,
-          duration: const Duration(seconds: 6),
-        ));
+        toast.show(
+          AppToastData.error(
+            title: fe.label,
+            subtitle: fe.message,
+            duration: const Duration(seconds: 6),
+          ),
+        );
       }
       return;
     }
@@ -100,11 +152,13 @@ class _BucketManagementAdminPageState
     final msg = e is ApiException
         ? e.message
         : 'Something went wrong. Please try again.';
-    AppToast.of(context).show(AppToastData.error(
-      title: action,
-      subtitle: msg,
-      duration: const Duration(seconds: 5),
-    ));
+    AppToast.of(context).show(
+      AppToastData.error(
+        title: action,
+        subtitle: msg,
+        duration: const Duration(seconds: 5),
+      ),
+    );
   }
 
   Future<void> _openCreateBucket() async {
@@ -117,8 +171,7 @@ class _BucketManagementAdminPageState
           final name = (result['name'] ?? '').toString();
           final abbreviation = (result['abbreviation'] ?? '').toString();
           final contents =
-              (result['contents'] as List?)?.cast<Map<String, dynamic>>() ??
-                  [];
+              (result['contents'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
           final created = await notifier.createBucket(
             name: name,
@@ -129,10 +182,12 @@ class _BucketManagementAdminPageState
           if (mounted) {
             final itemCount = created.items.length;
             final itemLabel = itemCount == 1 ? '1 item' : '$itemCount items';
-            AppToast.of(context).show(AppToastData.success(
-              title: 'Created: $name',
-              subtitle: '#${created.barcode}  ·  $itemLabel',
-            ));
+            AppToast.of(context).show(
+              AppToastData.success(
+                title: 'Created: $name',
+                subtitle: '#${created.barcode}  ·  $itemLabel',
+              ),
+            );
           }
         },
       ),
@@ -142,11 +197,10 @@ class _BucketManagementAdminPageState
   }
 
   Future<void> _openEditBucket(Bucket bucket) async {
-    if (_loadingBucketId != null) return; // already loading one
+    if (_loadingBucketId != null) return;
 
     final notifier = ref.read(bucketsProvider.notifier);
 
-    // Show spinner on the Edit button
     setState(() => _loadingBucketId = bucket.id);
 
     Bucket fresh;
@@ -160,13 +214,15 @@ class _BucketManagementAdminPageState
     setState(() => _loadingBucketId = null);
 
     final seeds = fresh.items
-        .map((i) => BucketContentSeed(
-              id: i.id,
-              name: i.name,
-              emoji: i.emoji,
-              quantity: i.quantity,
-              borrowed: i.borrowed,
-            ))
+        .map(
+          (i) => BucketContentSeed(
+            id: i.id,
+            name: i.name,
+            emoji: i.emoji,
+            quantity: i.quantity,
+            borrowed: i.borrowed,
+          ),
+        )
         .toList();
 
     final args = BucketUpsertArgs(
@@ -189,17 +245,20 @@ class _BucketManagementAdminPageState
           final changes = <String>[];
           if (newName != fresh.name) changes.add('${fresh.name} → $newName');
           if (updated.items.length != fresh.items.length) {
-            changes
-                .add('${fresh.items.length} → ${updated.items.length} items');
+            changes.add(
+              '${fresh.items.length} → ${updated.items.length} items',
+            );
           } else {
             changes.add('Items updated');
           }
 
           final displayName = newName != fresh.name ? newName : fresh.name;
-          AppToast.of(context).show(AppToastData.success(
-            title: 'Updated: $displayName',
-            subtitle: changes.join('  ·  '),
-          ));
+          AppToast.of(context).show(
+            AppToastData.success(
+              title: 'Updated: $displayName',
+              subtitle: changes.join('  ·  '),
+            ),
+          );
         }
       },
     );
@@ -213,7 +272,25 @@ class _BucketManagementAdminPageState
   }
 
   Future<void> _confirmDelete(Bucket bucket) async {
-    final hasBorrowed = bucket.items.any((i) => i.borrowed > 0);
+    if (_deletingBucketId != null) return;
+
+    final notifier = ref.read(bucketsProvider.notifier);
+
+    // ── 1. Fetch fresh bucket data so borrower info is up-to-date ────
+    setState(() => _deletingBucketId = bucket.id);
+
+    Bucket fresh;
+    try {
+      fresh = await notifier.fetchByBarcode(bucket.barcode);
+    } catch (_) {
+      fresh = bucket;
+    }
+
+    if (!mounted) return;
+    setState(() => _deletingBucketId = null);
+
+    // ── 2. Proceed with fresh data ───────────────────────────────────
+    final hasBorrowed = fresh.items.any((i) => i.borrowed > 0);
 
     if (hasBorrowed) {
       final ok = await showDialog<bool>(
@@ -221,7 +298,7 @@ class _BucketManagementAdminPageState
         builder: (context) => AlertDialog(
           title: const Text('Resolve borrowed items'),
           content: Text(
-            '"${bucket.name}" has items that are currently borrowed.\n\n'
+            '"${fresh.name}" has items that are currently borrowed.\n\n'
             'You need to resolve what happened to each borrowed item '
             'before the bucket can be deleted.',
           ),
@@ -245,30 +322,40 @@ class _BucketManagementAdminPageState
       if (!mounted || ok != true) return;
 
       try {
-        final notifier = ref.read(bucketsProvider.notifier);
+        setState(() => _deletingBucketId = fresh.id);
+
         final allResolved = await resolveAllBorrowedItems(
           context: context,
-          bucketId: bucket.id,
-          items: bucket.items,
+          bucketId: fresh.id,
+          bucketName: fresh.name,
+          items: fresh.items,
           notifier: notifier,
         );
 
-        if (!allResolved || !mounted) return;
+        if (!allResolved || !mounted) {
+          if (mounted) setState(() => _deletingBucketId = null);
+          return;
+        }
 
-        await notifier.deleteBucket(bucket.id);
+        await notifier.deleteBucket(fresh.id);
         if (!mounted) return;
 
-        final itemLabel = bucket.items.length == 1
+        setState(() => _deletingBucketId = null);
+
+        final itemLabel = fresh.items.length == 1
             ? '1 item'
-            : '${bucket.items.length} items';
-        AppToast.of(context).show(AppToastData.success(
-          title: 'Deleted: ${bucket.name}',
-          subtitle:
-              '#${bucket.barcode}  ·  $itemLabel cleared  ·  Borrowed items resolved',
-        ));
+            : '${fresh.items.length} items';
+        AppToast.of(context).show(
+          AppToastData.success(
+            title: 'Deleted: ${fresh.name}',
+            subtitle:
+                '#${fresh.barcode}  ·  $itemLabel cleared  ·  Borrowed items resolved',
+          ),
+        );
       } catch (e) {
+        if (mounted) setState(() => _deletingBucketId = null);
         if (!mounted) return;
-        _showError(e, action: 'Could not delete ${bucket.name}');
+        _showError(e, action: 'Could not delete ${fresh.name}');
       }
     } else {
       final ok = await showDialog<bool>(
@@ -276,7 +363,7 @@ class _BucketManagementAdminPageState
         builder: (context) => AlertDialog(
           title: const Text('Delete bucket?'),
           content: Text(
-            'This will remove "${bucket.name}" (#${bucket.barcode}).\n\n'
+            'This will remove "${fresh.name}" (#${fresh.barcode}).\n\n'
             'Inventory history stays in the audit log, but the bucket will '
             'no longer be available to scan.',
           ),
@@ -300,21 +387,29 @@ class _BucketManagementAdminPageState
       if (!mounted || ok != true) return;
 
       try {
-        await ref.read(bucketsProvider.notifier).deleteBucket(bucket.id);
+        setState(() => _deletingBucketId = fresh.id);
+        await notifier.deleteBucket(fresh.id);
         if (!mounted) return;
 
-        final itemLabel = bucket.items.length == 1
+        setState(() => _deletingBucketId = null);
+
+        final itemLabel = fresh.items.length == 1
             ? '1 item'
-            : '${bucket.items.length} items';
-        AppToast.of(context).show(AppToastData.success(
-          title: 'Deleted: ${bucket.name}',
-          subtitle: '#${bucket.barcode}  ·  $itemLabel cleared',
-        ));
+            : '${fresh.items.length} items';
+        AppToast.of(context).show(
+          AppToastData.success(
+            title: 'Deleted: ${fresh.name}',
+            subtitle: '#${fresh.barcode}  ·  $itemLabel cleared',
+          ),
+        );
       } catch (e) {
+        if (mounted) setState(() => _deletingBucketId = null);
         if (!mounted) return;
-        _showError(e, action: 'Could not delete ${bucket.name}');
+        _showError(e, action: 'Could not delete ${fresh.name}');
       }
     }
+
+    if (mounted) ref.read(bucketsProvider.notifier).refresh();
   }
 
   Future<void> _printBucketLabel(Bucket bucket) async {
@@ -334,8 +429,7 @@ class _BucketManagementAdminPageState
         onLayout: (format) async {
           final doc = pw.Document();
 
-          final barcodeH =
-              (format.height - 78).clamp(44.0, 66.0).toDouble();
+          final barcodeH = (format.height - 78).clamp(44.0, 66.0).toDouble();
 
           doc.addPage(
             pw.Page(
@@ -420,11 +514,18 @@ class _BucketManagementAdminPageState
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.error_outline, size: 48, color: AppColors.muted),
+                  const Icon(
+                    Icons.error_outline,
+                    size: 48,
+                    color: AppColors.muted,
+                  ),
                   const SizedBox(height: 12),
                   Text('Failed to load buckets', style: t.titleMedium),
                   const SizedBox(height: 4),
-                  Text('$err', style: t.bodySmall?.copyWith(color: AppColors.muted)),
+                  Text(
+                    '$err',
+                    style: t.bodySmall?.copyWith(color: AppColors.muted),
+                  ),
                   const SizedBox(height: 16),
                   FilledButton(
                     onPressed: () => ref.invalidate(bucketsProvider),
@@ -437,12 +538,16 @@ class _BucketManagementAdminPageState
               final q = _query.trim().toLowerCase();
               final items = q.isEmpty
                   ? allBuckets
-                  : allBuckets.where((b) {
-                      if (b.name.toLowerCase().contains(q)) return true;
-                      if (b.barcode.toLowerCase().contains(q)) return true;
-                      if (b.items.any((i) => i.name.toLowerCase().contains(q))) return true;
-                      return false;
-                    }).toList(growable: false);
+                  : allBuckets
+                        .where((b) {
+                          if (b.name.toLowerCase().contains(q)) return true;
+                          if (b.barcode.toLowerCase().contains(q)) return true;
+                          if (b.items.any(
+                            (i) => i.name.toLowerCase().contains(q),
+                          )) return true;
+                          return false;
+                        })
+                        .toList(growable: false);
 
               final isEmpty = items.isEmpty;
 
@@ -476,8 +581,20 @@ class _BucketManagementAdminPageState
                         padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
                         child: Row(
                           children: [
-                            Expanded(child: Text('ALL BUCKETS', style: t.labelMedium?.copyWith(color: AppColors.muted))),
-                            Text('STATUS', style: t.labelMedium?.copyWith(color: AppColors.muted)),
+                            Expanded(
+                              child: Text(
+                                'ALL BUCKETS',
+                                style: t.labelMedium?.copyWith(
+                                  color: AppColors.muted,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              'STATUS',
+                              style: t.labelMedium?.copyWith(
+                                color: AppColors.muted,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -489,14 +606,19 @@ class _BucketManagementAdminPageState
                           query: q,
                           emojiBase: emojiBase.copyWith(fontSize: 54),
                           titleStyle: t.titleLarge,
-                          bodyStyle: t.bodyLarge?.copyWith(color: AppColors.muted),
+                          bodyStyle: t.bodyLarge?.copyWith(
+                            color: AppColors.muted,
+                          ),
                         ),
                       )
                     else
                       SliverPadding(
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                         sliver: SliverList(
-                          delegate: SliverChildBuilderDelegate((context, index) {
+                          delegate: SliverChildBuilderDelegate((
+                            context,
+                            index,
+                          ) {
                             final b = items[index];
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 12),
@@ -505,6 +627,7 @@ class _BucketManagementAdminPageState
                                   bucket: b,
                                   radiusXl: tokens.radiusXl,
                                   editLoading: _loadingBucketId == b.id,
+                                  deleteLoading: _deletingBucketId == b.id,
                                   onEdit: () => _openEditBucket(b),
                                   onPrint: () => _printBucketLabel(b),
                                   onDelete: () => _confirmDelete(b),
@@ -514,7 +637,9 @@ class _BucketManagementAdminPageState
                           }, childCount: items.length),
                         ),
                       ),
-                    SliverToBoxAdapter(child: SizedBox(height: bottomFootprint)),
+                    SliverToBoxAdapter(
+                      child: SizedBox(height: bottomFootprint),
+                    ),
                   ],
                 ),
               );
@@ -529,7 +654,10 @@ class _BucketManagementAdminPageState
                   color: Colors.black.withValues(alpha: 0.05),
                   alignment: Alignment.center,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(tokens.radiusLg),
@@ -539,9 +667,18 @@ class _BucketManagementAdminPageState
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4)),
+                        const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2.4),
+                        ),
                         const SizedBox(width: 10),
-                        Text('Preparing label…', style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                        Text(
+                          'Preparing label…',
+                          style: t.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -575,20 +712,36 @@ class _ManageHeader extends StatelessWidget {
             children: [
               Text('Bucket Management', style: t.titleLarge),
               const SizedBox(height: 4),
-              Text('ADMIN VIEW', style: t.labelMedium?.copyWith(color: AppColors.primary, letterSpacing: 1.8)),
+              Text(
+                'ADMIN VIEW',
+                style: t.labelMedium?.copyWith(
+                  color: AppColors.primary,
+                  letterSpacing: 1.8,
+                ),
+              ),
             ],
           ),
         ),
         const SizedBox(width: 10),
         DecoratedBox(
-          decoration: BoxDecoration(color: AppColors.primary, shape: BoxShape.circle, boxShadow: tokens.glowShadow),
+          decoration: BoxDecoration(
+            color: AppColors.primary,
+            shape: BoxShape.circle,
+            boxShadow: tokens.glowShadow,
+          ),
           child: SizedBox(
-            width: 42, height: 42,
+            width: 42,
+            height: 42,
             child: IconButton(
               onPressed: onAdd,
               icon: const Icon(Icons.add_rounded, color: Colors.white),
-              splashRadius: 28, tooltip: 'New bucket',
-              style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory, hoverColor: Colors.transparent, highlightColor: Colors.transparent),
+              splashRadius: 28,
+              tooltip: 'New bucket',
+              style: IconButton.styleFrom(
+                splashFactory: NoSplash.splashFactory,
+                hoverColor: Colors.transparent,
+                highlightColor: Colors.transparent,
+              ),
             ),
           ),
         ),
@@ -602,6 +755,7 @@ class _BucketCard extends StatelessWidget {
     required this.bucket,
     required this.radiusXl,
     required this.editLoading,
+    required this.deleteLoading,
     required this.onEdit,
     required this.onPrint,
     required this.onDelete,
@@ -610,6 +764,7 @@ class _BucketCard extends StatelessWidget {
   final Bucket bucket;
   final double radiusXl;
   final bool editLoading;
+  final bool deleteLoading;
   final VoidCallback onEdit, onPrint, onDelete;
 
   @override
@@ -617,13 +772,31 @@ class _BucketCard extends StatelessWidget {
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
 
-    final nameStyle = t.titleMedium?.copyWith(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.ink);
-    final idStyle = t.bodyMedium?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w700);
+    final nameStyle = t.titleMedium?.copyWith(
+      fontSize: 18,
+      fontWeight: FontWeight.w800,
+      color: AppColors.ink,
+    );
+    final idStyle = t.bodyMedium?.copyWith(
+      color: AppColors.muted,
+      fontWeight: FontWeight.w700,
+    );
 
-    final labelStyle = t.bodySmall?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w600, fontSize: 10.5, height: 1.2);
-    final valueStyle = t.bodySmall?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w700, fontSize: 11, height: 1.2);
+    final labelStyle = t.bodySmall?.copyWith(
+      color: AppColors.muted,
+      fontWeight: FontWeight.w600,
+      fontSize: 10.5,
+      height: 1.2,
+    );
+    final valueStyle = t.bodySmall?.copyWith(
+      color: AppColors.ink,
+      fontWeight: FontWeight.w700,
+      fontSize: 11,
+      height: 1.2,
+    );
 
     final createdAtFormatted = _formatCreatedAt(bucket.createdAt);
+    final itemCount = bucket.items.length;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -640,20 +813,63 @@ class _BucketCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
               child: Column(
                 children: [
+                  // ── Name + status pill ─────────────────────────────
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(child: Text(bucket.name, style: nameStyle, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                      Expanded(
+                        child: Text(
+                          bucket.name,
+                          style: nameStyle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                       const SizedBox(width: 10),
                       _StockPill(state: bucket.stockState),
                     ],
                   ),
                   const SizedBox(height: 6),
-                  Align(alignment: Alignment.centerLeft, child: Text('#${bucket.barcode}', style: idStyle)),
+
+                  // ── Barcode + item count ───────────────────────────
+                  Row(
+                    children: [
+                      Text('#${bucket.barcode}', style: idStyle),
+                      const SizedBox(width: 10),
+                      Container(
+                        width: 4,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppColors.muted.withValues(alpha: 0.4),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Icon(
+                        Icons.inventory_2_outlined,
+                        size: 14,
+                        color: AppColors.muted,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$itemCount item${itemCount != 1 ? 's' : ''}',
+                        style: t.bodyMedium?.copyWith(
+                          color: AppColors.muted,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+
                   const SizedBox(height: 14),
+
+                  // ── Created by / at info box ───────────────────────
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.background,
                       borderRadius: BorderRadius.circular(tokens.radiusLg),
@@ -667,7 +883,12 @@ class _BucketCard extends StatelessWidget {
                             children: [
                               Text('Created by', style: labelStyle),
                               const SizedBox(height: 2),
-                              Text(bucket.createdByName, style: valueStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                              Text(
+                                bucket.createdByName,
+                                style: valueStyle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ],
                           ),
                         ),
@@ -678,7 +899,13 @@ class _BucketCard extends StatelessWidget {
                             children: [
                               Text('Created at', style: labelStyle),
                               const SizedBox(height: 2),
-                              Text(createdAtFormatted, style: valueStyle, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.right),
+                              Text(
+                                createdAtFormatted,
+                                style: valueStyle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.right,
+                              ),
                             ],
                           ),
                         ),
@@ -701,9 +928,21 @@ class _BucketCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Expanded(child: _CardActionButton(label: 'Print Label', onPressed: onPrint)),
+                  Expanded(
+                    child: _CardActionButton(
+                      label: 'Print Label',
+                      onPressed: onPrint,
+                    ),
+                  ),
                   const SizedBox(width: 10),
-                  Expanded(child: _CardActionButton(label: 'Delete', onPressed: onDelete, variant: _CardActionVariant.danger)),
+                  Expanded(
+                    child: _CardActionButton(
+                      label: 'Delete',
+                      loading: deleteLoading,
+                      onPressed: onDelete,
+                      variant: _CardActionVariant.danger,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -732,8 +971,12 @@ class _CardActionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
-    final bg = variant == _CardActionVariant.danger ? const Color(0xFFFEE4E2) : const Color(0xFFF2F4F7);
-    final fg = variant == _CardActionVariant.danger ? const Color(0xFFD92D20) : const Color(0xFF475467);
+    final bg = variant == _CardActionVariant.danger
+        ? const Color(0xFFFEE4E2)
+        : const Color(0xFFF2F4F7);
+    final fg = variant == _CardActionVariant.danger
+        ? const Color(0xFFD92D20)
+        : const Color(0xFF475467);
     return Material(
       color: bg,
       borderRadius: BorderRadius.circular(tokens.radiusLg),
@@ -776,24 +1019,67 @@ class _StockPill extends StatelessWidget {
     final t = Theme.of(context).textTheme;
     late final Color bg, border, fg;
     late final String text;
+    late final IconData icon;
+
     switch (state) {
-      case BucketStockState.fullyStocked:
-        bg = AppColors.successBg; border = const Color(0xFFB7E4C7); fg = AppColors.primary; text = 'In Stock';
+      case BucketStockState.available:
+        bg = AppColors.successBg;
+        border = const Color(0xFFB7E4C7);
+        fg = AppColors.primary;
+        text = 'Available';
+        icon = Icons.check_circle_outline_rounded;
       case BucketStockState.inUse:
-        bg = AppColors.warningBg; border = const Color(0xFFFBD38D); fg = const Color(0xFF8A5B00); text = 'In Use';
-      case BucketStockState.outOfStock:
-        bg = const Color(0xFFFFE8E8); border = const Color(0xFFFECACA); fg = const Color(0xFFB42318); text = 'Out of Stock';
+        bg = const Color(0xFFEFF8FF);
+        border = const Color(0xFFB2DDFF);
+        fg = const Color(0xFF175CD3);
+        text = 'In Use';
+        icon = Icons.swap_horiz_rounded;
+      case BucketStockState.lowStock:
+        bg = AppColors.warningBg;
+        border = const Color(0xFFFBD38D);
+        fg = const Color(0xFF8A5B00);
+        text = 'Low Stock';
+        icon = Icons.warning_amber_rounded;
+      case BucketStockState.depleted:
+        bg = const Color(0xFFFFE8E8);
+        border = const Color(0xFFFECACA);
+        fg = const Color(0xFFB42318);
+        text = 'Depleted';
+        icon = Icons.remove_circle_outline_rounded;
     }
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(color: bg, border: Border.all(color: border), borderRadius: BorderRadius.circular(999)),
-      child: Text(text, style: t.bodyMedium?.copyWith(color: fg, fontWeight: FontWeight.w800, letterSpacing: 0.2)),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        border: Border.all(color: border),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: fg),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: t.bodyMedium?.copyWith(
+              color: fg,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _SearchCard extends StatelessWidget {
-  const _SearchCard({required this.controller, required this.onChanged, required this.hintText});
+  const _SearchCard({
+    required this.controller,
+    required this.onChanged,
+    required this.hintText,
+  });
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
   final String hintText;
@@ -803,10 +1089,18 @@ class _SearchCard extends StatelessWidget {
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
     return Theme(
-      data: Theme.of(context).copyWith(hoverColor: Colors.transparent, splashColor: Colors.transparent, highlightColor: Colors.transparent),
+      data: Theme.of(context).copyWith(
+        hoverColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+      ),
       child: Container(
         height: 56,
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(tokens.radiusLg), boxShadow: tokens.cardShadow),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(tokens.radiusLg),
+          boxShadow: tokens.cardShadow,
+        ),
         child: Row(
           children: [
             const SizedBox(width: 16),
@@ -814,12 +1108,24 @@ class _SearchCard extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: TextField(
-                controller: controller, onChanged: onChanged, textInputAction: TextInputAction.search,
-                style: t.bodyLarge?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w600),
+                controller: controller,
+                onChanged: onChanged,
+                textInputAction: TextInputAction.search,
+                style: t.bodyLarge?.copyWith(
+                  color: AppColors.ink,
+                  fontWeight: FontWeight.w600,
+                ),
                 decoration: InputDecoration(
-                  border: InputBorder.none, enabledBorder: InputBorder.none, focusedBorder: InputBorder.none, isDense: true,
-                  contentPadding: const EdgeInsets.only(right: 16), hintText: hintText,
-                  hintStyle: t.bodyLarge?.copyWith(color: const Color(0xFFB9C0CC), fontWeight: FontWeight.w600),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.only(right: 16),
+                  hintText: hintText,
+                  hintStyle: t.bodyLarge?.copyWith(
+                    color: const Color(0xFFB9C0CC),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ),
@@ -834,14 +1140,28 @@ class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   _StickyHeaderDelegate({required this.height, required this.child});
   final double height;
   final Widget child;
-  @override double get minExtent => height;
-  @override double get maxExtent => height;
-  @override Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) => child;
-  @override bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) => oldDelegate.height != height || oldDelegate.child != child;
+  @override
+  double get minExtent => height;
+  @override
+  double get maxExtent => height;
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) => child;
+  @override
+  bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) =>
+      oldDelegate.height != height || oldDelegate.child != child;
 }
 
 class _EmptyBucketsState extends StatelessWidget {
-  const _EmptyBucketsState({required this.query, required this.emojiBase, required this.titleStyle, required this.bodyStyle});
+  const _EmptyBucketsState({
+    required this.query,
+    required this.emojiBase,
+    required this.titleStyle,
+    required this.bodyStyle,
+  });
   final String query;
   final TextStyle emojiBase;
   final TextStyle? titleStyle, bodyStyle;
@@ -849,18 +1169,23 @@ class _EmptyBucketsState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final title = query.isEmpty ? 'No buckets yet' : 'No buckets found';
-    final subtitle = query.isEmpty ? 'Create your first bucket to start tracking inventory' : 'Try a different keyword';
+    final subtitle = query.isEmpty
+        ? 'Create your first bucket to start tracking inventory'
+        : 'Try a different keyword';
     final emoji = query.isEmpty ? '🪣' : '🔎';
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text(emoji, style: emojiBase),
-          const SizedBox(height: 10),
-          Text(title, style: titleStyle, textAlign: TextAlign.center),
-          const SizedBox(height: 8),
-          Text(subtitle, style: bodyStyle, textAlign: TextAlign.center),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(emoji, style: emojiBase),
+            const SizedBox(height: 10),
+            Text(title, style: titleStyle, textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Text(subtitle, style: bodyStyle, textAlign: TextAlign.center),
+          ],
+        ),
       ),
     );
   }

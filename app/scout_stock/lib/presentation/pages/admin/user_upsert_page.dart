@@ -398,8 +398,8 @@ class _UserUpsertPageState extends State<UserUpsertPage> {
     final subtitle = _isSuperAdmin
         ? 'This is the Super Admin account. It cannot be modified.'
         : _isEdit
-        ? 'Update the details for this team member.'
-        : 'Fill in the details to add a new team member.';
+        ? 'Update the details for this user.'
+        : 'Fill in the details to add a new user.';
 
     final hintStyle = t.bodyMedium?.copyWith(color: AppColors.muted);
     final errorStyle = t.bodyMedium?.copyWith(

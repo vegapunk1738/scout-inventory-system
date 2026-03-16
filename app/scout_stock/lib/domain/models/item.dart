@@ -8,6 +8,7 @@ class Item {
     required this.quantity,
     required this.maxQuantity,
     required this.emoji,
+    this.bucketDeleted = false,
   });
 
   /// The item_type UUID from the backend.
@@ -28,6 +29,9 @@ class Item {
 
   final String emoji;
 
+  /// Whether the parent bucket has been soft-deleted by an admin.
+  final bool bucketDeleted;
+
   Item copyWith({
     String? id,
     String? name,
@@ -37,6 +41,7 @@ class Item {
     int? quantity,
     int? maxQuantity,
     String? emoji,
+    bool? bucketDeleted,
   }) {
     return Item(
       id: id ?? this.id,
@@ -47,6 +52,7 @@ class Item {
       quantity: quantity ?? this.quantity,
       maxQuantity: maxQuantity ?? this.maxQuantity,
       emoji: emoji ?? this.emoji,
+      bucketDeleted: bucketDeleted ?? this.bucketDeleted,
     );
   }
 

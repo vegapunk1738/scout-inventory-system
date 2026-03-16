@@ -22,6 +22,9 @@ class BucketItem {
   /// quantity - borrowed (never negative).
   final int available;
 
+  /// Whether every unit of this item type is currently borrowed.
+  bool get isFullyBorrowed => quantity > 0 && borrowed >= quantity;
+
   factory BucketItem.fromJson(Map<String, dynamic> json) {
     return BucketItem(
       id: json['id'] as String,
@@ -58,20 +61,33 @@ class BucketItem {
   }
 }
 
+/// Stock status for a bucket, computed from its items.
+///
+/// - [available]  — nothing is borrowed; every item is in stock.
+/// - [inUse]      — some units are borrowed, but no item type is fully out.
+/// - [lowStock]   — at least one item type is fully borrowed, but not all.
+/// - [depleted]   — every item type is fully borrowed (nothing left).
 enum BucketStockState {
-  fullyStocked,
+  available,
   inUse,
-  outOfStock;
+  lowStock,
+  depleted;
 
+  /// Kept for backward-compat if the server still sends a string.
+  /// Falls back to [depleted] for unknown values.
   factory BucketStockState.fromString(String s) {
     switch (s) {
+      case 'available':
       case 'fully_stocked':
-        return BucketStockState.fullyStocked;
+        return BucketStockState.available;
       case 'in_use':
         return BucketStockState.inUse;
+      case 'low_stock':
+        return BucketStockState.lowStock;
+      case 'depleted':
       case 'out_of_stock':
       default:
-        return BucketStockState.outOfStock;
+        return BucketStockState.depleted;
     }
   }
 }
@@ -86,7 +102,6 @@ class Bucket {
     required this.createdBy,
     required this.createdByName,
     required this.itemTypeCount,
-    required this.stockState,
     required this.items,
   });
 
@@ -97,8 +112,21 @@ class Bucket {
   final String createdBy;
   final String createdByName;
   final int itemTypeCount;
-  final BucketStockState stockState;
   final List<BucketItem> items;
+
+  /// Computed from items — no longer stored as a field.
+  BucketStockState get stockState {
+    if (items.isEmpty) return BucketStockState.available;
+
+    final totalBorrowed = items.fold<int>(0, (s, i) => s + i.borrowed);
+    if (totalBorrowed == 0) return BucketStockState.available;
+
+    final fullyBorrowedCount = items.where((i) => i.isFullyBorrowed).length;
+
+    if (fullyBorrowedCount == items.length) return BucketStockState.depleted;
+    if (fullyBorrowedCount > 0) return BucketStockState.lowStock;
+    return BucketStockState.inUse;
+  }
 
   factory Bucket.fromJson(Map<String, dynamic> json) {
     final items = (json['items'] as List?)
@@ -114,9 +142,6 @@ class Bucket {
       createdBy: json['created_by'] as String,
       createdByName: json['created_by_name'] as String? ?? 'Unknown',
       itemTypeCount: json['item_type_count'] as int? ?? items.length,
-      stockState: BucketStockState.fromString(
-        json['stock_state'] as String? ?? 'out_of_stock',
-      ),
       items: items,
     );
   }
@@ -125,7 +150,6 @@ class Bucket {
     String? name,
     List<BucketItem>? items,
     int? itemTypeCount,
-    BucketStockState? stockState,
   }) {
     return Bucket(
       id: id,
@@ -135,7 +159,6 @@ class Bucket {
       createdBy: createdBy,
       createdByName: createdByName,
       itemTypeCount: itemTypeCount ?? this.itemTypeCount,
-      stockState: stockState ?? this.stockState,
       items: items ?? this.items,
     );
   }

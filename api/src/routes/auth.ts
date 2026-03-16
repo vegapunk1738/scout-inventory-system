@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { Env, JwtPayload } from "../types";
 import { users } from "../db/schema";
 import { verifyPassword } from "../lib/crypto";
@@ -70,14 +70,18 @@ authRoutes.post("/login", async (c) => {
 
   const isScoutId = /^\d+$/.test(identifier);
 
+  // Only match active (non-deleted) users
   const user = (
     await db
       .select()
       .from(users)
       .where(
-        isScoutId
-          ? eq(users.scout_id, identifier)
-          : eq(users.full_name, identifier)
+        and(
+          isScoutId
+            ? eq(users.scout_id, identifier)
+            : eq(users.full_name, identifier),
+          isNull(users.deleted_at)
+        )
       )
       .limit(1)
   )[0];
@@ -113,12 +117,12 @@ authRoutes.post("/refresh", authAllowExpired(), async (c) => {
   const payload = c.get("jwtPayload");
   const db = c.get("db");
 
-  // Re-fetch from DB to pick up any role/name chang es
+  // Re-fetch from DB; reject if user was soft-deleted
   const user = (
     await db
       .select()
       .from(users)
-      .where(eq(users.id, payload.sub))
+      .where(and(eq(users.id, payload.sub), isNull(users.deleted_at)))
       .limit(1)
   )[0];
 

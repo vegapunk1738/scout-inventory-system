@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, isNull, and } from "drizzle-orm";
 import { Env } from "../types";
-import { users } from "../db/schema";
+import { buckets, item_types, transaction_items, transactions, users } from "../db/schema";
 import { hashPassword } from "../lib/crypto";
 import { NotFoundError, ConflictError, ForbiddenError } from "../lib/errors";
 import { auth, requireRole } from "../middleware/auth";
@@ -61,6 +61,26 @@ async function findNextScoutId(db: Env["Variables"]["db"]): Promise<string> {
   return next.toString().padStart(4, "0");
 }
 
+/**
+ * Finds an active (non-deleted) user by scout_id or UUID.
+ * Returns null if not found or soft-deleted.
+ */
+async function findActiveUser(
+  db: Env["Variables"]["db"],
+  identifier: string
+) {
+  const isScoutId = /^\d+$/.test(identifier);
+  const condition = isScoutId
+    ? and(eq(users.scout_id, identifier), isNull(users.deleted_at))
+    : and(eq(users.id, identifier), isNull(users.deleted_at));
+
+  const row = (
+    await db.select().from(users).where(condition).limit(1)
+  )[0];
+
+  return row ?? null;
+}
+
 // ─── Routes ─────────────────────────────────────────────────────────────────
 
 const userRoutes = new Hono<Env>();
@@ -74,31 +94,87 @@ userRoutes.get("/next-scout-id", async (c) => {
   return c.json({ scout_id: scoutId });
 });
 
-// GET /users
+// GET /users — list all active (non-deleted) users
 userRoutes.get("/", async (c) => {
   const db = c.get("db");
-  const rows = await db.select().from(users).all();
+  const rows = await db
+    .select()
+    .from(users)
+    .where(isNull(users.deleted_at));
   return c.json({ data: rows.map(sanitize) });
 });
 
-// GET /users/:identifier
+// GET /users/by-scout-id/:scoutId/borrowed-items — all items a user currently has borrowed
+userRoutes.get("/by-scout-id/:scoutId/borrowed-items", async (c) => {
+  const scoutId = c.req.param("scoutId");
+  const db = c.get("db");
+
+  const user = (
+    await db
+      .select()
+      .from(users)
+      .where(eq(users.scout_id, scoutId))
+      .limit(1)
+  )[0];
+  if (!user) throw new NotFoundError("User");
+
+  // Find all item types this user has net-positive borrows for
+  const rows = await db
+    .select({
+      item_type_id: transaction_items.item_type_id,
+      bucket_id: transaction_items.bucket_id,
+      borrowed: sql<number>`
+        SUM(CASE WHEN ${transaction_items.direction} = -1 THEN ${transaction_items.quantity} ELSE 0 END)
+        - SUM(CASE WHEN ${transaction_items.direction} = 1 THEN ${transaction_items.quantity} ELSE 0 END)
+      `,
+    })
+    .from(transaction_items)
+    .innerJoin(transactions, eq(transaction_items.transaction_id, transactions.id))
+    .where(eq(transactions.user_id, user.id))
+    .groupBy(transaction_items.item_type_id, transaction_items.bucket_id)
+    .having(sql`
+      SUM(CASE WHEN ${transaction_items.direction} = -1 THEN ${transaction_items.quantity} ELSE 0 END)
+      - SUM(CASE WHEN ${transaction_items.direction} = 1 THEN ${transaction_items.quantity} ELSE 0 END)
+      > 0
+    `);
+
+  // Hydrate with item + bucket names
+  const result = await Promise.all(
+    rows.map(async (row) => {
+      const item = (
+        await db
+          .select()
+          .from(item_types)
+          .where(eq(item_types.id, row.item_type_id))
+          .limit(1)
+      )[0];
+      const bucket = (
+        await db
+          .select()
+          .from(buckets)
+          .where(eq(buckets.id, row.bucket_id))
+          .limit(1)
+      )[0];
+      return {
+        bucket_id: row.bucket_id,
+        bucket_name: bucket?.name ?? "Unknown",
+        item_type_id: row.item_type_id,
+        item_name: item?.name ?? "Unknown",
+        item_emoji: item?.emoji ?? "📦",
+        borrowed: Number(row.borrowed),
+      };
+    })
+  );
+
+  return c.json({ data: result });
+});
+
+// GET /users/:identifier — single active user by scout_id or UUID
 userRoutes.get("/:identifier", async (c) => {
   const identifier = c.req.param("identifier");
   const db = c.get("db");
 
-  const isScoutId = /^\d+$/.test(identifier);
-
-  const row = (
-    await db
-      .select()
-      .from(users)
-      .where(
-        isScoutId
-          ? eq(users.scout_id, identifier)
-          : eq(users.id, identifier)
-      )
-      .limit(1)
-  )[0];
+  const row = await findActiveUser(db, identifier);
   if (!row) throw new NotFoundError("User");
 
   return c.json({ data: sanitize(row) });
@@ -109,12 +185,12 @@ userRoutes.post("/", async (c) => {
   const body = CreateUserBody.parse(await c.req.json());
   const db = c.get("db");
 
-  // Check name uniqueness (always a hard error).
+  // Check name uniqueness among active users.
   const byName = (
     await db
       .select({ id: users.id })
       .from(users)
-      .where(eq(users.full_name, body.full_name))
+      .where(and(eq(users.full_name, body.full_name), isNull(users.deleted_at)))
       .limit(1)
   )[0];
   if (byName) {
@@ -161,20 +237,13 @@ userRoutes.post("/", async (c) => {
   return c.json({ data: sanitize(row) }, 201);
 });
 
-// PATCH /users/:identifier
+// PATCH /users/:identifier — update an active user
 userRoutes.patch("/:identifier", async (c) => {
   const identifier = c.req.param("identifier");
   const body = UpdateUserBody.parse(await c.req.json());
   const db = c.get("db");
 
-  const isScoutId = /^\d+$/.test(identifier);
-  const condition = isScoutId
-    ? eq(users.scout_id, identifier)
-    : eq(users.id, identifier);
-
-  const existing = (
-    await db.select().from(users).where(condition).limit(1)
-  )[0];
+  const existing = await findActiveUser(db, identifier);
   if (!existing) throw new NotFoundError("User");
 
   if (isSuperAdmin(existing)) {
@@ -186,7 +255,7 @@ userRoutes.patch("/:identifier", async (c) => {
       await db
         .select({ id: users.id })
         .from(users)
-        .where(eq(users.full_name, body.full_name))
+        .where(and(eq(users.full_name, body.full_name), isNull(users.deleted_at)))
         .limit(1)
     )[0];
     if (conflict) {
@@ -210,26 +279,26 @@ userRoutes.patch("/:identifier", async (c) => {
   return c.json({ data: sanitize(updated) });
 });
 
-// DELETE /users/:identifier
+// DELETE /users/:identifier — soft-delete user
 userRoutes.delete("/:identifier", async (c) => {
   const identifier = c.req.param("identifier");
   const db = c.get("db");
 
-  const isScoutId = /^\d+$/.test(identifier);
-  const condition = isScoutId
-    ? eq(users.scout_id, identifier)
-    : eq(users.id, identifier);
-
-  const existing = (
-    await db.select().from(users).where(condition).limit(1)
-  )[0];
+  const existing = await findActiveUser(db, identifier);
   if (!existing) throw new NotFoundError("User");
 
   if (isSuperAdmin(existing)) {
     throw new ForbiddenError("Super Admin cannot be deleted");
   }
 
-  await db.delete(users).where(eq(users.id, existing.id));
+  // Soft-delete: set deleted_at timestamp.
+  // The row stays so transaction history JOINs still resolve
+  // the user's name and scout_id.
+  const now = new Date().toISOString();
+  await db
+    .update(users)
+    .set({ deleted_at: now })
+    .where(eq(users.id, existing.id));
 
   return c.json({ message: "User deleted" });
 });

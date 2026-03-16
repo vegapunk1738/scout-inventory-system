@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, isNull } from "drizzle-orm";
 import { Env } from "../types";
 import { buckets, item_types, transaction_items, transactions, users } from "../db/schema";
 import { NotFoundError, ConflictError, ForbiddenError } from "../lib/errors";
@@ -152,12 +152,15 @@ const bucketRoutes = new Hono<Env>();
 // All bucket routes require authentication
 bucketRoutes.use("/*", auth());
 
-// ─── GET /buckets — list all buckets with item counts + stock state ─────────
+// ─── GET /buckets — list all ACTIVE buckets (excludes soft-deleted) ─────────
 
 bucketRoutes.get("/", async (c) => {
   const db = c.get("db");
 
-  const allBuckets = await db.select().from(buckets).all();
+  const allBuckets = await db
+    .select()
+    .from(buckets)
+    .where(isNull(buckets.deleted_at));
 
   const result = await Promise.all(
     allBuckets.map(async (bucket) => {
@@ -181,19 +184,6 @@ bucketRoutes.get("/", async (c) => {
         })
       );
 
-      // Determine stock state
-      const totalStock = itemsWithAvailable.reduce((s, i) => s + i.quantity, 0);
-      const totalAvailable = itemsWithAvailable.reduce((s, i) => s + i.available, 0);
-
-      let stock_state: "fully_stocked" | "in_use" | "out_of_stock";
-      if (totalStock === 0 || items.length === 0) {
-        stock_state = "out_of_stock";
-      } else if (totalAvailable < totalStock) {
-        stock_state = "in_use";
-      } else {
-        stock_state = "fully_stocked";
-      }
-
       const creator = (
         await db
           .select({ full_name: users.full_name })
@@ -210,7 +200,6 @@ bucketRoutes.get("/", async (c) => {
         created_by: bucket.created_by,
         created_by_name: creator?.full_name ?? "Unknown",
         item_type_count: items.length,
-        stock_state,
         items: itemsWithAvailable,
       };
     })
@@ -224,7 +213,7 @@ bucketRoutes.get("/", async (c) => {
   return c.json({ data: result });
 });
 
-// ─── GET /buckets/barcode/:barcode — scan lookup ────────────────────────────
+// ─── GET /buckets/barcode/:barcode — scan lookup (active only) ──────────────
 
 bucketRoutes.get("/barcode/:barcode", async (c) => {
   const barcode = c.req.param("barcode");
@@ -234,7 +223,7 @@ bucketRoutes.get("/barcode/:barcode", async (c) => {
     await db
       .select()
       .from(buckets)
-      .where(eq(buckets.barcode, barcode))
+      .where(and(eq(buckets.barcode, barcode), isNull(buckets.deleted_at)))
       .limit(1)
   )[0];
 
@@ -267,14 +256,18 @@ bucketRoutes.get("/barcode/:barcode", async (c) => {
   });
 });
 
-// ─── GET /buckets/:id — single bucket detail ───────────────────────────────
+// ─── GET /buckets/:id — single bucket detail (active only) ─────────────────
 
 bucketRoutes.get("/:id", async (c) => {
   const id = c.req.param("id");
   const db = c.get("db");
 
   const bucket = (
-    await db.select().from(buckets).where(eq(buckets.id, id)).limit(1)
+    await db
+      .select()
+      .from(buckets)
+      .where(and(eq(buckets.id, id), isNull(buckets.deleted_at)))
+      .limit(1)
   )[0];
 
   if (!bucket) throw new NotFoundError("Bucket");
@@ -374,7 +367,11 @@ bucketRoutes.patch("/:id", requireRole("admin"), async (c) => {
   const db = c.get("db");
 
   const existing = (
-    await db.select().from(buckets).where(eq(buckets.id, id)).limit(1)
+    await db
+      .select()
+      .from(buckets)
+      .where(and(eq(buckets.id, id), isNull(buckets.deleted_at)))
+      .limit(1)
   )[0];
   if (!existing) throw new NotFoundError("Bucket");
 
@@ -633,14 +630,18 @@ bucketRoutes.post(
   }
 );
 
-// ─── DELETE /buckets/:id — delete bucket (admin only) ───────────────────────
+// ─── DELETE /buckets/:id — soft-delete bucket (admin only) ──────────────────
 
 bucketRoutes.delete("/:id", requireRole("admin"), async (c) => {
   const id = c.req.param("id");
   const db = c.get("db");
 
   const existing = (
-    await db.select().from(buckets).where(eq(buckets.id, id)).limit(1)
+    await db
+      .select()
+      .from(buckets)
+      .where(and(eq(buckets.id, id), isNull(buckets.deleted_at)))
+      .limit(1)
   )[0];
   if (!existing) throw new NotFoundError("Bucket");
 
@@ -678,7 +679,6 @@ bucketRoutes.delete("/:id", requireRole("admin"), async (c) => {
   }
 
   if (itemsWithBorrowers.length > 0) {
-    // Return 409 with full borrower details so frontend can show resolution sheet
     return c.json(
       {
         error: "bucket_has_borrowed_items",
@@ -691,6 +691,8 @@ bucketRoutes.delete("/:id", requireRole("admin"), async (c) => {
     );
   }
 
+  const now = new Date().toISOString();
+
   // Soft-delete item_types: detach from bucket but keep rows so
   // transaction history still has item names and emojis via LEFT JOIN
   await db
@@ -698,8 +700,13 @@ bucketRoutes.delete("/:id", requireRole("admin"), async (c) => {
     .set({ bucket_id: "__deleted__" })
     .where(eq(item_types.bucket_id, id));
 
-  // Hard-delete the bucket itself
-  await db.delete(buckets).where(eq(buckets.id, id));
+  // Soft-delete the bucket: set deleted_at timestamp.
+  // The row stays so transaction history JOINs still resolve
+  // the bucket name and barcode.
+  await db
+    .update(buckets)
+    .set({ deleted_at: now })
+    .where(eq(buckets.id, id));
 
   return c.json({ message: "Bucket deleted" });
 });

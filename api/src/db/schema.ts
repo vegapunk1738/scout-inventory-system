@@ -7,6 +7,7 @@ export const users = sqliteTable("users", {
   password_hash: text("password_hash").notNull(),
   role: text("role", { enum: ["admin", "scout"] }).notNull().default("scout"),
   created_at: text("created_at").notNull(),
+  deleted_at: text("deleted_at"),
 });
 
 export const buckets = sqliteTable("buckets", {
@@ -15,6 +16,7 @@ export const buckets = sqliteTable("buckets", {
   barcode: text("barcode").unique().notNull(),
   created_at: text("created_at").notNull(),
   created_by: text("created_by").notNull(),
+  deleted_at: text("deleted_at"),
 });
 
 export const item_types = sqliteTable("item_types", {

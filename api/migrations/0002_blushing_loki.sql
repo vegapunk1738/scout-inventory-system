@@ -1,0 +1,1 @@
+ALTER TABLE `buckets` ADD `deleted_at` text;
