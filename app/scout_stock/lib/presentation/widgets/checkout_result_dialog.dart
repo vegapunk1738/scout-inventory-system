@@ -272,7 +272,7 @@ class _ItemSummaryBox extends StatelessWidget {
         shrinkWrap: true,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         itemCount: items.length,
-        separatorBuilder: (_, __) => Divider(
+        separatorBuilder: (_, _) => Divider(
           height: 1,
           thickness: 0.5,
           color: AppColors.outline.withValues(alpha: 0.6),
@@ -354,7 +354,7 @@ Future<void> showCheckoutResultDialog(
     barrierLabel: 'Checkout Result',
     barrierColor: Colors.black.withValues(alpha: 0.55),
     transitionDuration: const Duration(milliseconds: 220),
-    pageBuilder: (_, __, ___) {
+    pageBuilder: (_, _, _) {
       return SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -362,7 +362,7 @@ Future<void> showCheckoutResultDialog(
         ),
       );
     },
-    transitionBuilder: (_, anim, __, w) {
+    transitionBuilder: (_, anim, _, w) {
       final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
       return FadeTransition(
         opacity: curved,

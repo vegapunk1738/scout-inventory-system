@@ -87,7 +87,7 @@ class _CartPageState extends ConsumerState<CartPage> {
                       listBottomPadding,
                     ),
                     itemCount: items.length,
-                    separatorBuilder: (_, __) =>
+                    separatorBuilder: (_, _) =>
                         SizedBox(height: compact ? 10 : 12),
                     addAutomaticKeepAlives: false,
                     addRepaintBoundaries: false,

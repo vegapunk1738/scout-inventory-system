@@ -48,8 +48,18 @@ String _sectionTitle(DateTime d) {
   final isToday = _dateOnly(d) == today;
 
   const months = [
-    'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
-    'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER',
+    'JANUARY',
+    'FEBRUARY',
+    'MARCH',
+    'APRIL',
+    'MAY',
+    'JUNE',
+    'JULY',
+    'AUGUST',
+    'SEPTEMBER',
+    'OCTOBER',
+    'NOVEMBER',
+    'DECEMBER',
   ];
 
   final base = '${months[d.month - 1]} ${d.day}';
@@ -85,6 +95,7 @@ class MePage extends ConsumerWidget {
 
     final displayName = user?.name ?? 'Loading…';
     final role = user == null ? '' : (user.role.isAdmin ? 'Admin' : 'Scout');
+    final scoutId = user?.scoutId ?? '0000';
     final initials = _initials(displayName);
 
     final rows = _buildRows(
@@ -205,6 +216,7 @@ class MePage extends ConsumerWidget {
                     extent: stickyExtent,
                     top: top,
                     name: displayName,
+                    scoutId: scoutId,
                     role: role,
                     initials: initials,
                     mode: me.mode,
@@ -354,6 +366,7 @@ class _MeStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
     required this.extent,
     required this.top,
     required this.name,
+    required this.scoutId,
     required this.role,
     required this.initials,
     required this.mode,
@@ -365,6 +378,7 @@ class _MeStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   final double extent;
   final double top;
   final String name;
+  final String scoutId;
   final String role;
   final String initials;
   final MeFilterMode mode;
@@ -378,23 +392,45 @@ class _MeStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   double get maxExtent => extent;
 
   @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final showShadow = overlapsContent || shrinkOffset > 0.5;
 
     final headerShadow = showShadow && tokens.cardShadow.isNotEmpty
-        ? [tokens.cardShadow.first.copyWith(blurRadius: 10, offset: const Offset(0, 6))]
+        ? [
+            tokens.cardShadow.first.copyWith(
+              blurRadius: 10,
+              offset: const Offset(0, 6),
+            ),
+          ]
         : const <BoxShadow>[];
 
     return Container(
-      decoration: BoxDecoration(color: AppColors.background, boxShadow: headerShadow),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        boxShadow: headerShadow,
+      ),
       child: Padding(
         padding: EdgeInsets.fromLTRB(20, top + 12, 20, 12),
         child: Column(
           children: [
-            _MeHeader(name: name, role: role, initials: initials, onLogout: onLogout),
+            _MeHeader(
+              name: name,
+              role: role,
+              scoutId: scoutId,
+              initials: initials,
+              onLogout: onLogout,
+            ),
             const SizedBox(height: 14),
-            _BorrowReturnPills(mode: mode, onTapBorrowed: onTapBorrowed, onTapReturned: onTapReturned),
+            _BorrowReturnPills(
+              mode: mode,
+              onTapBorrowed: onTapBorrowed,
+              onTapReturned: onTapReturned,
+            ),
           ],
         ),
       ),
@@ -403,16 +439,25 @@ class _MeStickyHeaderDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   bool shouldRebuild(covariant _MeStickyHeaderDelegate oldDelegate) {
-    return extent != oldDelegate.extent || top != oldDelegate.top ||
-        name != oldDelegate.name || role != oldDelegate.role ||
-        initials != oldDelegate.initials || mode != oldDelegate.mode ||
+    return extent != oldDelegate.extent ||
+        top != oldDelegate.top ||
+        name != oldDelegate.name ||
+        role != oldDelegate.role ||
+        initials != oldDelegate.initials ||
+        mode != oldDelegate.mode ||
         onLogout != oldDelegate.onLogout;
   }
 }
 
 class _MeHeader extends StatelessWidget {
-  const _MeHeader({required this.name, required this.role, required this.initials, required this.onLogout});
-  final String name, role, initials;
+  const _MeHeader({
+    required this.name,
+    required this.role,
+    required this.scoutId,
+    required this.initials,
+    required this.onLogout,
+  });
+  final String name, role, scoutId, initials;
   final VoidCallback onLogout;
 
   @override
@@ -423,22 +468,43 @@ class _MeHeader extends StatelessWidget {
         CircleAvatar(
           radius: 22,
           backgroundColor: AppColors.onPrimary,
-          child: Text(initials, style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+          child: Text(
+            initials,
+            style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
         ),
         const SizedBox(width: 14),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.headlineMedium?.copyWith(fontSize: 20)),
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: t.headlineMedium?.copyWith(fontSize: 20),
+              ),
               const SizedBox(height: 2),
-              Text(role, style: t.titleMedium?.copyWith(color: AppColors.primary, fontWeight: FontWeight.w800, fontSize: 14)),
+              Text(
+                '#$scoutId | $role',
+                style: t.titleMedium?.copyWith(
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                ),
+              ),
             ],
           ),
         ),
         SizedBox(
-          width: 44, height: 44,
-          child: IconButton(onPressed: onLogout, icon: const Icon(Icons.logout_rounded), splashRadius: 22, tooltip: 'Logout'),
+          width: 44,
+          height: 44,
+          child: IconButton(
+            onPressed: onLogout,
+            icon: const Icon(Icons.logout_rounded),
+            splashRadius: 22,
+            tooltip: 'Logout',
+          ),
         ),
       ],
     );
@@ -446,7 +512,11 @@ class _MeHeader extends StatelessWidget {
 }
 
 class _BorrowReturnPills extends StatelessWidget {
-  const _BorrowReturnPills({required this.mode, required this.onTapBorrowed, required this.onTapReturned});
+  const _BorrowReturnPills({
+    required this.mode,
+    required this.onTapBorrowed,
+    required this.onTapReturned,
+  });
   final MeFilterMode mode;
   final VoidCallback onTapBorrowed, onTapReturned;
 
@@ -465,9 +535,29 @@ class _BorrowReturnPills extends StatelessWidget {
       padding: const EdgeInsets.all(6),
       child: Row(
         children: [
-          Expanded(child: _Pill(label: 'Borrowed', selected: mode == MeFilterMode.borrowedOnly, selectedBg: AppColors.primary, selectedFg: Colors.white, unselectedFg: AppColors.muted, textStyle: t.titleMedium, onTap: onTapBorrowed)),
+          Expanded(
+            child: _Pill(
+              label: 'Borrowed',
+              selected: mode == MeFilterMode.borrowedOnly,
+              selectedBg: AppColors.primary,
+              selectedFg: Colors.white,
+              unselectedFg: AppColors.muted,
+              textStyle: t.titleMedium,
+              onTap: onTapBorrowed,
+            ),
+          ),
           const SizedBox(width: 6),
-          Expanded(child: _Pill(label: 'Returned', selected: mode == MeFilterMode.returnedOnly, selectedBg: AppColors.ink.withValues(alpha: 0.72), selectedFg: Colors.white, unselectedFg: AppColors.muted, textStyle: t.titleMedium, onTap: onTapReturned)),
+          Expanded(
+            child: _Pill(
+              label: 'Returned',
+              selected: mode == MeFilterMode.returnedOnly,
+              selectedBg: AppColors.ink.withValues(alpha: 0.72),
+              selectedFg: Colors.white,
+              unselectedFg: AppColors.muted,
+              textStyle: t.titleMedium,
+              onTap: onTapReturned,
+            ),
+          ),
         ],
       ),
     );
@@ -475,7 +565,15 @@ class _BorrowReturnPills extends StatelessWidget {
 }
 
 class _Pill extends StatelessWidget {
-  const _Pill({required this.label, required this.selected, required this.selectedBg, required this.selectedFg, required this.unselectedFg, required this.textStyle, required this.onTap});
+  const _Pill({
+    required this.label,
+    required this.selected,
+    required this.selectedBg,
+    required this.selectedFg,
+    required this.unselectedFg,
+    required this.textStyle,
+    required this.onTap,
+  });
   final String label;
   final bool selected;
   final Color selectedBg, selectedFg, unselectedFg;
@@ -491,9 +589,19 @@ class _Pill extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOutCubic,
-        decoration: BoxDecoration(color: selected ? selectedBg : Colors.transparent, borderRadius: BorderRadius.circular(tokens.radiusXl)),
+        decoration: BoxDecoration(
+          color: selected ? selectedBg : Colors.transparent,
+          borderRadius: BorderRadius.circular(tokens.radiusXl),
+        ),
         alignment: Alignment.center,
-        child: Text(label, style: (textStyle ?? const TextStyle()).copyWith(color: selected ? selectedFg : unselectedFg, fontWeight: FontWeight.w800, fontSize: 14)),
+        child: Text(
+          label,
+          style: (textStyle ?? const TextStyle()).copyWith(
+            color: selected ? selectedFg : unselectedFg,
+            fontWeight: FontWeight.w800,
+            fontSize: 14,
+          ),
+        ),
       ),
     );
   }
@@ -504,9 +612,20 @@ class _Pill extends StatelessWidget {
 enum _MeRowKind { header, borrowed, returned }
 
 class _MeRow {
-  const _MeRow.header(this.header, {this.topGap = 0}) : kind = _MeRowKind.header, borrowed = null, returned = null;
-  const _MeRow.borrowed(this.borrowed) : kind = _MeRowKind.borrowed, header = null, returned = null, topGap = 0;
-  const _MeRow.returned(this.returned) : kind = _MeRowKind.returned, header = null, borrowed = null, topGap = 0;
+  const _MeRow.header(this.header, {this.topGap = 0})
+    : kind = _MeRowKind.header,
+      borrowed = null,
+      returned = null;
+  const _MeRow.borrowed(this.borrowed)
+    : kind = _MeRowKind.borrowed,
+      header = null,
+      returned = null,
+      topGap = 0;
+  const _MeRow.returned(this.returned)
+    : kind = _MeRowKind.returned,
+      header = null,
+      borrowed = null,
+      topGap = 0;
 
   final _MeRowKind kind;
   final String? header;
@@ -548,11 +667,19 @@ List<_MeRow> _buildRows({
     rows.add(_MeRow.header(_sectionTitle(day), topGap: i == 0 ? 0 : 18));
 
     final bucket = map[day]!;
-    final borrowedRows = bucket.where((x) => x.kind == _MeRowKind.borrowed).toList();
-    final returnedRows = bucket.where((x) => x.kind == _MeRowKind.returned).toList();
+    final borrowedRows = bucket
+        .where((x) => x.kind == _MeRowKind.borrowed)
+        .toList();
+    final returnedRows = bucket
+        .where((x) => x.kind == _MeRowKind.returned)
+        .toList();
 
-    borrowedRows.sort((a, b) => a.borrowed!.item.name.compareTo(b.borrowed!.item.name));
-    returnedRows.sort((a, b) => a.returned!.item.name.compareTo(b.returned!.item.name));
+    borrowedRows.sort(
+      (a, b) => a.borrowed!.item.name.compareTo(b.borrowed!.item.name),
+    );
+    returnedRows.sort(
+      (a, b) => a.returned!.item.name.compareTo(b.returned!.item.name),
+    );
 
     rows.addAll(borrowedRows);
     rows.addAll(returnedRows);
@@ -576,9 +703,17 @@ class _DateHeader extends StatelessWidget {
       padding: EdgeInsets.only(top: topGap, bottom: 12),
       child: Column(
         children: [
-          Row(children: [
-            Text(title, style: t.labelMedium?.copyWith(color: isToday ? AppColors.primary : AppColors.muted, letterSpacing: 1.2)),
-          ]),
+          Row(
+            children: [
+              Text(
+                title,
+                style: t.labelMedium?.copyWith(
+                  color: isToday ? AppColors.primary : AppColors.muted,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 10),
           const Divider(height: 1),
           const SizedBox(height: 12),
@@ -625,7 +760,13 @@ class _MetaInfoColumn extends StatelessWidget {
       children: [
         Text('Managed by', style: labelStyle, textAlign: TextAlign.right),
         const SizedBox(height: 1),
-        Text(managedBy, style: valueStyle, textAlign: TextAlign.right, maxLines: 1, overflow: TextOverflow.ellipsis),
+        Text(
+          managedBy,
+          style: valueStyle,
+          textAlign: TextAlign.right,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         const SizedBox(height: 6),
         Text(actionLabel, style: labelStyle, textAlign: TextAlign.right),
         const SizedBox(height: 1),
@@ -675,14 +816,18 @@ class _BorrowedCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: tile, height: tile,
+                width: tile,
+                height: tile,
                 decoration: BoxDecoration(
                   color: AppColors.background,
                   borderRadius: BorderRadius.circular(tokens.radiusLg),
                   border: Border.all(color: AppColors.outline),
                 ),
                 alignment: Alignment.center,
-                child: Text(item.emoji, style: emojiBase.copyWith(fontSize: emojiSize)),
+                child: Text(
+                  item.emoji,
+                  style: emojiBase.copyWith(fontSize: emojiSize),
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -691,11 +836,27 @@ class _BorrowedCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(item.name, maxLines: 2, overflow: TextOverflow.ellipsis,
-                        style: textTheme.titleMedium?.copyWith(fontSize: compact ? 15 : 16, height: 1.15)),
+                      Text(
+                        item.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.titleMedium?.copyWith(
+                          fontSize: compact ? 15 : 16,
+                          height: 1.15,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      Text('${item.bucketName} | ${item.bucketBarcode}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: textTheme.bodyMedium?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w700, fontSize: compact ? 11.5 : 12, height: 1.1)),
+                      Text(
+                        '${item.bucketName} | ${item.bucketBarcode}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: AppColors.muted,
+                          fontWeight: FontWeight.w700,
+                          fontSize: compact ? 11.5 : 12,
+                          height: 1.1,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -710,7 +871,12 @@ class _BorrowedCard extends StatelessWidget {
             ],
           ),
           SizedBox(height: compact ? 10 : 12),
-          _ReturnQtyStepperHold(value: item.quantity, max: item.maxQuantity, compact: compact, onChanged: onChanged),
+          _ReturnQtyStepperHold(
+            value: item.quantity,
+            max: item.maxQuantity,
+            compact: compact,
+            onChanged: onChanged,
+          ),
         ],
       ),
     );
@@ -759,14 +925,18 @@ class _ReturnedCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: tile, height: tile,
+                width: tile,
+                height: tile,
                 decoration: BoxDecoration(
                   color: AppColors.background,
                   borderRadius: BorderRadius.circular(tokens.radiusLg),
                   border: Border.all(color: AppColors.outline),
                 ),
                 alignment: Alignment.center,
-                child: Text(item.emoji, style: emojiBase.copyWith(fontSize: emojiSize)),
+                child: Text(
+                  item.emoji,
+                  style: emojiBase.copyWith(fontSize: emojiSize),
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -775,18 +945,31 @@ class _ReturnedCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(item.name, maxLines: 2, overflow: TextOverflow.ellipsis,
+                      Text(
+                        item.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: textTheme.titleMedium?.copyWith(
-                          fontSize: compact ? 15 : 16, height: 1.15,
+                          fontSize: compact ? 15 : 16,
+                          height: 1.15,
                           color: AppColors.muted,
-                          decoration: crossline ? TextDecoration.lineThrough : TextDecoration.none,
-                        )),
+                          decoration: crossline
+                              ? TextDecoration.lineThrough
+                              : TextDecoration.none,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      Text('${item.bucketName} | ${item.bucketBarcode}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                      Text(
+                        '${item.bucketName} | ${item.bucketBarcode}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: textTheme.bodyMedium?.copyWith(
                           color: AppColors.muted.withValues(alpha: 0.85),
-                          fontWeight: FontWeight.w700, fontSize: compact ? 11.5 : 12, height: 1.1,
-                        )),
+                          fontWeight: FontWeight.w700,
+                          fontSize: compact ? 11.5 : 12,
+                          height: 1.1,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -801,7 +984,11 @@ class _ReturnedCard extends StatelessWidget {
             ],
           ),
           SizedBox(height: compact ? 10 : 12),
-          _ReturnedQtyBar(returned: item.quantity, max: item.maxQuantity, compact: compact),
+          _ReturnedQtyBar(
+            returned: item.quantity,
+            max: item.maxQuantity,
+            compact: compact,
+          ),
         ],
       ),
     );
@@ -813,7 +1000,12 @@ class _ReturnedCard extends StatelessWidget {
 // ─── Stepper / qty widgets ──────────────────────────────────────────────────
 
 class _ReturnQtyStepperHold extends StatelessWidget {
-  const _ReturnQtyStepperHold({required this.value, required this.max, required this.compact, required this.onChanged});
+  const _ReturnQtyStepperHold({
+    required this.value,
+    required this.max,
+    required this.compact,
+    required this.onChanged,
+  });
   final int value, max;
   final bool compact;
   final ValueChanged<int> onChanged;
@@ -832,19 +1024,73 @@ class _ReturnQtyStepperHold extends StatelessWidget {
 
     return Container(
       height: height,
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(tokens.radiusLg), border: Border.all(color: AppColors.outline)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(tokens.radiusLg),
+        border: Border.all(color: AppColors.outline),
+      ),
       child: Row(
         children: [
           const SizedBox(width: 6),
-          HoldIconButton(enabled: canMinus, maxCount: max, icon: Icons.remove_rounded, iconColor: canMinus ? AppColors.primary : disabledFg, fill: AppColors.background, border: Colors.transparent, width: btnSize, height: btnSize, iconSize: iconSize, radius: tokens.radiusLg, onTap: canMinus ? () => onChanged(clampNext(value - 1)) : null, onHoldTick: canMinus ? (step) => onChanged(clampNext(value - step)) : null),
+          HoldIconButton(
+            enabled: canMinus,
+            maxCount: max,
+            icon: Icons.remove_rounded,
+            iconColor: canMinus ? AppColors.primary : disabledFg,
+            fill: AppColors.background,
+            border: Colors.transparent,
+            width: btnSize,
+            height: btnSize,
+            iconSize: iconSize,
+            radius: tokens.radiusLg,
+            onTap: canMinus ? () => onChanged(clampNext(value - 1)) : null,
+            onHoldTick: canMinus
+                ? (step) => onChanged(clampNext(value - step))
+                : null,
+          ),
           const SizedBox(width: 6),
-          Expanded(child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text('$value', style: (compact ? t.titleLarge : t.headlineSmall)?.copyWith(fontWeight: FontWeight.w900, height: 1)),
-            const SizedBox(height: 2),
-            Text('of $max to be returned', style: t.bodySmall?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w700, height: 1)),
-          ]))),
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '$value',
+                    style: (compact ? t.titleLarge : t.headlineSmall)?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      height: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'of $max to be returned',
+                    style: t.bodySmall?.copyWith(
+                      color: AppColors.muted,
+                      fontWeight: FontWeight.w700,
+                      height: 1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
           const SizedBox(width: 6),
-          HoldIconButton(enabled: canPlus, maxCount: max, icon: Icons.add_rounded, iconColor: canPlus ? AppColors.primary : disabledFg, fill: AppColors.background, border: Colors.transparent, width: btnSize, height: btnSize, iconSize: iconSize, radius: tokens.radiusLg, onTap: canPlus ? () => onChanged(clampNext(value + 1)) : null, onHoldTick: canPlus ? (step) => onChanged(clampNext(value + step)) : null),
+          HoldIconButton(
+            enabled: canPlus,
+            maxCount: max,
+            icon: Icons.add_rounded,
+            iconColor: canPlus ? AppColors.primary : disabledFg,
+            fill: AppColors.background,
+            border: Colors.transparent,
+            width: btnSize,
+            height: btnSize,
+            iconSize: iconSize,
+            radius: tokens.radiusLg,
+            onTap: canPlus ? () => onChanged(clampNext(value + 1)) : null,
+            onHoldTick: canPlus
+                ? (step) => onChanged(clampNext(value + step))
+                : null,
+          ),
           const SizedBox(width: 6),
         ],
       ),
@@ -853,7 +1099,11 @@ class _ReturnQtyStepperHold extends StatelessWidget {
 }
 
 class _ReturnedQtyBar extends StatelessWidget {
-  const _ReturnedQtyBar({required this.returned, required this.max, required this.compact});
+  const _ReturnedQtyBar({
+    required this.returned,
+    required this.max,
+    required this.compact,
+  });
   final int returned, max;
   final bool compact;
 
@@ -864,13 +1114,33 @@ class _ReturnedQtyBar extends StatelessWidget {
     final height = compact ? 50.0 : 56.0;
     return Container(
       height: height,
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(tokens.radiusLg), border: Border.all(color: AppColors.outline)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(tokens.radiusLg),
+        border: Border.all(color: AppColors.outline),
+      ),
       alignment: Alignment.center,
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('$returned', style: (compact ? t.titleLarge : t.headlineSmall)?.copyWith(fontWeight: FontWeight.w900, height: 1)),
-        const SizedBox(height: 2),
-        Text('of $max returned', style: t.bodySmall?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w700, height: 1)),
-      ]),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$returned',
+            style: (compact ? t.titleLarge : t.headlineSmall)?.copyWith(
+              fontWeight: FontWeight.w900,
+              height: 1,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'of $max returned',
+            style: t.bodySmall?.copyWith(
+              color: AppColors.muted,
+              fontWeight: FontWeight.w700,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -878,7 +1148,14 @@ class _ReturnedQtyBar extends StatelessWidget {
 // ─── Empty state ────────────────────────────────────────────────────────────
 
 class _EmptyMeState extends StatelessWidget {
-  const _EmptyMeState({required this.emptyTitle, required this.emptySubtitle, required this.emptyEmoji, required this.emojiBase, required this.titleStyle, required this.bodyStyle});
+  const _EmptyMeState({
+    required this.emptyTitle,
+    required this.emptySubtitle,
+    required this.emptyEmoji,
+    required this.emojiBase,
+    required this.titleStyle,
+    required this.bodyStyle,
+  });
   final String emptyTitle, emptySubtitle, emptyEmoji;
   final TextStyle emojiBase;
   final TextStyle? titleStyle, bodyStyle;
@@ -888,13 +1165,16 @@ class _EmptyMeState extends StatelessWidget {
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text(emptyEmoji, style: emojiBase.copyWith(fontSize: 54)),
-          const SizedBox(height: 10),
-          Text(emptyTitle, style: titleStyle, textAlign: TextAlign.center),
-          const SizedBox(height: 8),
-          Text(emptySubtitle, style: bodyStyle, textAlign: TextAlign.center),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(emptyEmoji, style: emojiBase.copyWith(fontSize: 54)),
+            const SizedBox(height: 10),
+            Text(emptyTitle, style: titleStyle, textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Text(emptySubtitle, style: bodyStyle, textAlign: TextAlign.center),
+          ],
+        ),
       ),
     );
   }
