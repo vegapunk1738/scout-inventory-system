@@ -5,6 +5,7 @@ import { Env } from "../types";
 import { buckets, item_types, transaction_items, transactions, users } from "../db/schema";
 import { NotFoundError, ConflictError, ForbiddenError } from "../lib/errors";
 import { auth, requireRole } from "../middleware/auth";
+import { writeAuditLog } from "../lib/audit";
 
 // ─── Validation schemas ─────────────────────────────────────────────────────
 
@@ -348,6 +349,15 @@ bucketRoutes.post("/", requireRole("admin"), async (c) => {
     });
   }
 
+  await writeAuditLog(db, {
+    actor_id: jwt.sub,
+    entity: "bucket",
+    entity_id: bucketId,
+    action: "created",
+    summary: `Created bucket "${body.name}" (${barcode})`,
+    meta: { barcode, item_count: body.items.length },
+  });
+
   return c.json(
     {
       data: {
@@ -490,6 +500,15 @@ bucketRoutes.patch("/:id", requireRole("admin"), async (c) => {
     })
   );
 
+  await writeAuditLog(db, {
+    actor_id: c.get("jwtPayload").sub,
+    entity: "bucket",
+    entity_id: id,
+    action: "updated",
+    summary: `Updated bucket "${body.name ?? existing.name}"`,
+    meta: { name: body.name, items_changed: !!body.items },
+  });
+
   return c.json({
     data: {
       ...updated,
@@ -621,6 +640,22 @@ bucketRoutes.post(
         .where(eq(item_types.id, itemId));
     }
 
+    await writeAuditLog(db, {
+      actor_id: c.get("jwtPayload").sub,
+      entity: "item",
+      entity_id: itemId,
+      action: "resolved",
+      summary: `Resolved "${item.name}" — ${body.resolutions.length} resolution(s)`,
+      meta: {
+        bucket_id: bucketId,
+        resolutions: body.resolutions.map((r) => ({
+          user_id: r.user_id,
+          quantity: r.quantity,
+          status: r.status,
+        })),
+      },
+    });
+
     return c.json({
       data: {
         resolved: resolvedTransactions,
@@ -707,6 +742,14 @@ bucketRoutes.delete("/:id", requireRole("admin"), async (c) => {
     .update(buckets)
     .set({ deleted_at: now })
     .where(eq(buckets.id, id));
+
+  await writeAuditLog(db, {
+    actor_id: c.get("jwtPayload").sub,
+    entity: "bucket",
+    entity_id: id,
+    action: "deleted",
+    summary: `Deleted bucket "${existing.name}" (${existing.barcode})`,
+  });
 
   return c.json({ message: "Bucket deleted" });
 });

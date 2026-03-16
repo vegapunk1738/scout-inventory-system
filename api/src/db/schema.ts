@@ -46,3 +46,21 @@ export const transaction_items = sqliteTable("transaction_items", {
     .notNull()
     .default("normal"),
 });
+
+// ─── Audit logs for non-transaction events ──────────────────────────────────
+// Captures bucket CRUD, user CRUD, and admin resolve actions.
+// Transactions (checkout/return) are NOT duplicated here — the activity
+// endpoint merges both tables into a single feed.
+
+export const audit_logs = sqliteTable("audit_logs", {
+  id: text("id").primaryKey(),
+  actor_id: text("actor_id").notNull(),
+  entity: text("entity", { enum: ["bucket", "user", "item"] }).notNull(),
+  entity_id: text("entity_id").notNull(),
+  action: text("action", {
+    enum: ["created", "updated", "deleted", "resolved"],
+  }).notNull(),
+  summary: text("summary").notNull(),
+  meta: text("meta"),
+  created_at: text("created_at").notNull(),
+});

@@ -7,6 +7,7 @@ import { hashPassword } from "../lib/crypto";
 import { NotFoundError, ConflictError, ForbiddenError } from "../lib/errors";
 import { auth, requireRole } from "../middleware/auth";
 import { SEED_USERS } from "../lib/seed";
+import { writeAuditLog } from "../lib/audit";
 
 // ─── Validation schemas ─────────────────────────────────────────────────────
 const CreateUserBody = z.object({
@@ -234,6 +235,15 @@ userRoutes.post("/", async (c) => {
       .returning()
   )[0];
 
+  await writeAuditLog(db, {
+    actor_id: c.get("jwtPayload").sub,
+    entity: "user",
+    entity_id: row.id,
+    action: "created",
+    summary: `Created user "${body.full_name}" (Scout #${scoutId})`,
+    meta: { scout_id: scoutId, role: body.role },
+  });
+
   return c.json({ data: sanitize(row) }, 201);
 });
 
@@ -276,6 +286,17 @@ userRoutes.patch("/:identifier", async (c) => {
       .returning()
   )[0];
 
+  await writeAuditLog(db, {
+    actor_id: c.get("jwtPayload").sub,
+    entity: "user",
+    entity_id: existing.id,
+    action: "updated",
+    summary: `Updated user "${updated.full_name}" (Scout #${existing.scout_id})`,
+    meta: {
+      fields_changed: Object.keys(body).filter((k) => k !== "password"),
+    },
+  });
+
   return c.json({ data: sanitize(updated) });
 });
 
@@ -299,6 +320,14 @@ userRoutes.delete("/:identifier", async (c) => {
     .update(users)
     .set({ deleted_at: now })
     .where(eq(users.id, existing.id));
+
+  await writeAuditLog(db, {
+    actor_id: c.get("jwtPayload").sub,
+    entity: "user",
+    entity_id: existing.id,
+    action: "deleted",
+    summary: `Deleted user "${existing.full_name}" (Scout #${existing.scout_id})`,
+  });
 
   return c.json({ message: "User deleted" });
 });

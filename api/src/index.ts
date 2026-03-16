@@ -7,6 +7,7 @@ import { authRoutes } from "./routes/auth";
 import { userRoutes } from "./routes/users";
 import { bucketRoutes } from "./routes/buckets";
 import { transactionRoutes } from "./routes/transactions";
+import { activityRoutes } from "./routes/activity";
 import { ensureSeedUsers } from "./lib/seed";
 
 const app = new Hono<Env>();
@@ -33,6 +34,7 @@ app.route("/auth", authRoutes);
 app.route("/users", userRoutes);
 app.route("/buckets", bucketRoutes);
 app.route("/transactions", transactionRoutes);
+app.route("/activity", activityRoutes);
 
 // ─── Error handling ─────────────────────────────────────────────────────────
 
