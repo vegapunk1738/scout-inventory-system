@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -9,6 +10,8 @@ import 'package:scout_stock/presentation/widgets/app_toast.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
 import 'package:scout_stock/presentation/widgets/glowing_action_button.dart';
 import 'package:scout_stock/presentation/widgets/hold_icon_button.dart';
+import 'package:scout_stock/presentation/widgets/resolve_borrowed_helper.dart';
+import 'package:scout_stock/state/providers/buckets_provider.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
 import '../../widgets/attention_text_field_widget.dart';
@@ -18,22 +21,14 @@ import '../../widgets/attention_text_field_widget.dart';
 // request fires regardless of the parent page's lifecycle state.
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Async callback that performs the actual API mutation.
-/// Throws on failure so the upsert page can surface the error and let the
-/// user retry without losing their input.
 typedef BucketUpsertSubmitCallback =
     Future<void> Function(Map<String, dynamic> result);
 
-/// Passed as extra when navigating to the create page.
 class CreateBucketArgs {
   const CreateBucketArgs({required this.onSubmit});
-
-  /// Called with the form payload. Must complete the API call before
-  /// returning. Throw to signal failure.
   final BucketUpsertSubmitCallback onSubmit;
 }
 
-/// Navigation args for editing an existing bucket.
 class BucketUpsertArgs {
   const BucketUpsertArgs({
     required this.barcode,
@@ -45,21 +40,14 @@ class BucketUpsertArgs {
     this.emoji = '🪣',
   });
 
-  /// Backend UUID — null in create mode.
   final String? bucketId;
-
-  /// Bucket barcode / ID (Code128 content), e.g. "SSB-COO-104".
   final String barcode;
   final String name;
 
-  /// Kept for compatibility with existing callers, but ignored in the UI.
   @Deprecated('Bucket emojis are no longer used in the UI.')
   final String emoji;
 
   final List<BucketContentSeed> contents;
-
-  /// Called with the form payload. Must complete the API call before
-  /// returning. Throw to signal failure.
   final BucketUpsertSubmitCallback onSubmit;
 }
 
@@ -72,27 +60,24 @@ class BucketContentSeed {
     this.borrowed = 0,
   });
 
-  /// Backend item_type UUID — null for brand-new items.
   final String? id;
   final String name;
   final String emoji;
   final int quantity;
-
-  /// How many are currently borrowed. Used to enforce min quantity.
   final int borrowed;
 }
 
-class BucketUpsertPage extends StatefulWidget {
+class BucketUpsertPage extends ConsumerStatefulWidget {
   const BucketUpsertPage({super.key, this.editArgs, this.createArgs});
 
   final BucketUpsertArgs? editArgs;
   final CreateBucketArgs? createArgs;
 
   @override
-  State<BucketUpsertPage> createState() => _BucketUpsertPageState();
+  ConsumerState<BucketUpsertPage> createState() => _BucketUpsertPageState();
 }
 
-class _BucketUpsertPageState extends State<BucketUpsertPage> {
+class _BucketUpsertPageState extends ConsumerState<BucketUpsertPage> {
   final _nameCtrl = TextEditingController();
   final _nameFocus = FocusNode();
   final _nameKey = GlobalKey<AttentionTextFieldState>();
@@ -101,11 +86,10 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
   final _rng = math.Random.secure();
 
   bool _saving = false;
+  bool _resolving = false;
 
-  // Create-mode: digits are generated once and kept stable while typing.
   late final String _digits3 = (_rng.nextInt(1000)).toString().padLeft(3, '0');
 
-  // Edit-mode: barcode is fixed.
   String? _fixedBarcode;
 
   final List<_ContentDraft> _items = [];
@@ -198,24 +182,80 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
     });
   }
 
+  // ── Remove item ────────────────────────────────────────────────────────
+
   void _removeItem(int index) {
     final item = _items[index];
 
     if (item.borrowed > 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Cannot remove "${item.nameCtrl.text}" — '
-            '${item.borrowed} currently borrowed',
-          ),
-        ),
-      );
+      _resolveAndRemoveItem(index);
       return;
     }
 
     setState(() {
       final it = _items.removeAt(index);
       it.dispose();
+    });
+  }
+
+  Future<void> _resolveAndRemoveItem(int index) async {
+    if (_resolving) return;
+    final item = _items[index];
+    final bucketId = widget.editArgs?.bucketId;
+    final itemId = item.existingId;
+
+    if (bucketId == null || itemId == null) return;
+
+    _resolving = true;
+    try {
+      final notifier = ref.read(bucketsProvider.notifier);
+
+      // Removing entirely → resolve ALL borrowed
+      final resolved = await resolveSingleBorrowedItem(
+        context: context,
+        bucketId: bucketId,
+        itemTypeId: itemId,
+        itemName: item.nameCtrl.text,
+        itemEmoji: item.emoji,
+        notifier: notifier,
+      );
+
+      if (!resolved || !mounted) return;
+
+      setState(() {
+        final it = _items.removeAt(index);
+        it.dispose();
+      });
+
+      if (mounted) {
+        AppToast.of(context).show(
+          AppToastData.success(
+            title: 'Resolved & Removed',
+            subtitle: item.nameCtrl.text,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.of(context).show(
+        AppToastData.error(
+          title: 'Resolution failed',
+          subtitle: '$e',
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } finally {
+      _resolving = false;
+    }
+  }
+
+  // ── Quantity delta (free editing, no resolution) ───────────────────────
+
+  void _onDelta(_ContentDraft item, int delta) {
+    if (delta == 0) return;
+    setState(() {
+      final next = (item.quantity + delta).clamp(1, 999);
+      item.quantity = next;
     });
   }
 
@@ -227,15 +267,6 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOut,
     );
-  }
-
-  void _onDelta(_ContentDraft item, int delta) {
-    if (delta == 0) return;
-    setState(() {
-      final minQty = math.max(1, item.borrowed);
-      final next = (item.quantity + delta).clamp(minQty, 999);
-      item.quantity = next;
-    });
   }
 
   // ── Error display ──────────────────────────────────────────────────────
@@ -269,7 +300,7 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
     );
   }
 
-  // ── Submit ─────────────────────────────────────────────────────────────
+  // ── Submit (with pre-save resolution for quantity decreases) ───────────
 
   Future<void> _submit() async {
     if (_saving) return;
@@ -321,7 +352,38 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
     try {
       FocusScope.of(context).unfocus();
 
-      // Build the result payload.
+      // ── Pre-save resolution: resolve items where newQty < borrowed ──
+      final bucketId = widget.editArgs?.bucketId;
+      if (_isEdit && bucketId != null) {
+        final notifier = ref.read(bucketsProvider.notifier);
+
+        for (final item in _items) {
+          if (item.existingId == null) continue; // new item, no borrowers
+          if (item.quantity >= item.borrowed) continue; // no excess
+
+          final excess = item.borrowed - item.quantity;
+
+          if (!mounted) return;
+
+          final resolved = await resolvePartialBorrowed(
+            context: context,
+            bucketId: bucketId,
+            itemTypeId: item.existingId!,
+            itemName: item.nameCtrl.text,
+            itemEmoji: item.emoji,
+            resolveCount: excess,
+            notifier: notifier,
+          );
+
+          if (!resolved) {
+            // User cancelled resolution → abort save
+            if (mounted) setState(() => _saving = false);
+            return;
+          }
+        }
+      }
+
+      // ── Build the result payload ──────────────────────────────────
       final payload = <String, dynamic>{
         'name': name,
         'abbreviation': _abbreviation,
@@ -340,20 +402,15 @@ class _BucketUpsertPageState extends State<BucketUpsertPage> {
             .toList(),
       };
 
-      // FIX: Call the mutation callback *here*, while we're still mounted.
-      // Only pop on success — on failure the user stays on the form.
       final callback = _isEdit
           ? widget.editArgs!.onSubmit
           : widget.createArgs!.onSubmit;
       await callback(payload);
 
-      // API call succeeded — now pop.
       if (mounted) context.pop();
     } catch (e) {
-      // Surface the error on this page so the user can retry.
       _showSubmitError(e);
     } finally {
-      // Always reset _saving so the button is never permanently disabled.
       if (mounted) setState(() => _saving = false);
     }
   }
@@ -577,7 +634,6 @@ class _ContentDraft {
   final GlobalKey<AttentionTextFieldState> nameKey =
       GlobalKey<AttentionTextFieldState>();
 
-  /// Backend item_type UUID — null for brand-new items.
   final String? existingId;
 
   String emoji;
@@ -702,12 +758,18 @@ class _ContentItemCard extends StatelessWidget {
         : const <BoxShadow>[];
 
     final hasBorrowed = item.borrowed > 0;
+    // Show a warning if the current quantity is set below borrowed
+    final needsResolution = item.quantity < item.borrowed;
+    final excess = needsResolution ? item.borrowed - item.quantity : 0;
 
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(tokens.radiusXl),
         boxShadow: shadow,
+        border: needsResolution
+            ? Border.all(color: const Color(0xFFFDA29B), width: 1.5)
+            : null,
       ),
       padding: EdgeInsets.all(compact ? 10 : 12),
       child: Column(
@@ -747,11 +809,7 @@ class _ContentItemCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 10),
-              _TrashSquareButton(
-                size: tile,
-                onTap: onRemove,
-                disabled: hasBorrowed,
-              ),
+              _TrashSquareButton(size: tile, onTap: onRemove, disabled: false),
             ],
           ),
 
@@ -760,31 +818,39 @@ class _ContentItemCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: AppColors.warningBg,
+                color: needsResolution
+                    ? const Color(0xFFFEF3F2)
+                    : AppColors.warningBg,
                 borderRadius: BorderRadius.circular(tokens.radiusLg),
-                border: Border.all(color: const Color(0xFFFBD38D)),
+                border: Border.all(
+                  color: needsResolution
+                      ? const Color(0xFFFDA29B)
+                      : const Color(0xFFFBD38D),
+                ),
               ),
               child: Row(
                 children: [
-                  const Icon(
-                    Icons.people_outline_rounded,
+                  Icon(
+                    needsResolution
+                        ? Icons.warning_rounded
+                        : Icons.people_outline_rounded,
                     size: 16,
-                    color: Color(0xFF8A5B00),
+                    color: needsResolution
+                        ? const Color(0xFFD92D20)
+                        : const Color(0xFF8A5B00),
                   ),
                   const SizedBox(width: 6),
-                  Text(
-                    '${item.borrowed} currently borrowed',
-                    style: textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF8A5B00),
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    'min qty: ${item.borrowed}',
-                    style: textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF8A5B00),
-                      fontWeight: FontWeight.w800,
+                  Expanded(
+                    child: Text(
+                      needsResolution
+                          ? '$excess item${excess != 1 ? 's' : ''} will need resolving on save'
+                          : '${item.borrowed}x currently borrowed',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: needsResolution
+                            ? const Color(0xFFD92D20)
+                            : const Color(0xFF8A5B00),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
@@ -795,7 +861,7 @@ class _ContentItemCard extends StatelessWidget {
           SizedBox(height: compact ? 10 : 12),
           _QtyStepperEdit(
             value: item.quantity,
-            minValue: math.max(1, item.borrowed),
+            minValue: 1, // always 1 — resolution happens at save time
             compact: compact,
             onDelta: onDelta,
           ),

@@ -46,7 +46,7 @@ const UpdateBucketBody = z.object({
 const ResolveBorrowedBody = z.object({
   resolutions: z.array(
     z.object({
-      user_id: z.string().uuid(),
+      user_id: z.string().min(1),  // not .uuid() — seed users have non-v4 UUIDs
       quantity: z.number().int().min(1),
       status: z.enum(["returned", "lost", "damaged"]),
     })
@@ -86,15 +86,6 @@ async function generateUniqueBarcode(
 /**
  * For a given item_type, compute how many are currently borrowed (checked out
  * but not yet returned) across all users.
- *
- * borrowed = ABS( SUM(direction * quantity) )  — but only the negative part
- * Actually: available = stock + SUM(direction * quantity)
- *   where SUM will be negative when items are checked out.
- * So borrowed = -SUM(direction * quantity) when SUM < 0, else 0.
- *
- * Simpler: total_out = SUM(quantity) WHERE direction = -1
- *          total_in  = SUM(quantity) WHERE direction = +1
- *          borrowed  = total_out - total_in
  */
 async function getBorrowedCount(
   db: Env["Variables"]["db"],
@@ -410,11 +401,26 @@ bucketRoutes.patch("/:id", requireRole("admin"), async (c) => {
         // Check if any are borrowed before deleting
         const borrowed = await getBorrowedCount(db, existing.id);
         if (borrowed > 0) {
-          throw new ConflictError(
-            `Cannot delete "${existing.name}" — ${borrowed} currently borrowed`
+          // Return 409 with borrower details so frontend can show resolution sheet
+          const borrowers = await getBorrowedByUser(db, existing.id);
+          return c.json(
+            {
+              error: "item_has_borrowed",
+              message: `Cannot delete "${existing.name}" — ${borrowed} currently borrowed`,
+              item_type_id: existing.id,
+              item_name: existing.name,
+              item_emoji: existing.emoji,
+              currently_borrowed: borrowed,
+              borrowers: borrowers.filter((b) => b.borrowed > 0),
+            },
+            409
           );
         }
-        await db.delete(item_types).where(eq(item_types.id, existing.id));
+        // Soft-delete: detach from bucket so item name stays for transaction history
+        await db
+          .update(item_types)
+          .set({ bucket_id: "__deleted__" })
+          .where(eq(item_types.id, existing.id));
       }
     }
 
@@ -638,26 +644,64 @@ bucketRoutes.delete("/:id", requireRole("admin"), async (c) => {
   )[0];
   if (!existing) throw new NotFoundError("Bucket");
 
-  // Check if any items are currently borrowed
+  // Check if any items are currently borrowed — collect full details
   const items = await db
     .select()
     .from(item_types)
     .where(eq(item_types.bucket_id, id));
 
+  const itemsWithBorrowers: Array<{
+    item_type_id: string;
+    item_name: string;
+    item_emoji: string;
+    total_borrowed: number;
+    borrowers: Array<{
+      user_id: string;
+      full_name: string;
+      scout_id: string;
+      borrowed: number;
+    }>;
+  }> = [];
+
   for (const item of items) {
     const borrowed = await getBorrowedCount(db, item.id);
     if (borrowed > 0) {
-      throw new ConflictError(
-        `Cannot delete bucket — "${item.name}" has ${borrowed} items currently borrowed`
-      );
+      const borrowers = await getBorrowedByUser(db, item.id);
+      itemsWithBorrowers.push({
+        item_type_id: item.id,
+        item_name: item.name,
+        item_emoji: item.emoji,
+        total_borrowed: borrowed,
+        borrowers: borrowers.filter((b) => b.borrowed > 0),
+      });
     }
   }
 
-  // Delete items first (FK not enforced in SQLite by default, but good practice)
-  await db.delete(item_types).where(eq(item_types.bucket_id, id));
+  if (itemsWithBorrowers.length > 0) {
+    // Return 409 with full borrower details so frontend can show resolution sheet
+    return c.json(
+      {
+        error: "bucket_has_borrowed_items",
+        message: `Cannot delete bucket — ${itemsWithBorrowers.length} item(s) have borrowed units`,
+        bucket_id: id,
+        bucket_name: existing.name,
+        items_with_borrowers: itemsWithBorrowers,
+      },
+      409
+    );
+  }
+
+  // Soft-delete item_types: detach from bucket but keep rows so
+  // transaction history still has item names and emojis via LEFT JOIN
+  await db
+    .update(item_types)
+    .set({ bucket_id: "__deleted__" })
+    .where(eq(item_types.bucket_id, id));
+
+  // Hard-delete the bucket itself
   await db.delete(buckets).where(eq(buckets.id, id));
 
   return c.json({ message: "Bucket deleted" });
 });
 
-export { bucketRoutes };  
+export { bucketRoutes };

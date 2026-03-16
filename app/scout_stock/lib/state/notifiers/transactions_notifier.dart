@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:scout_stock/data/api/api_client.dart';
 import 'package:scout_stock/domain/models/item.dart';
 import 'package:scout_stock/state/providers/api_provider.dart';
+import 'package:scout_stock/state/providers/me_provider.dart';
+import 'package:scout_stock/state/providers/transactions_provider.dart';
 import 'package:uuid/uuid.dart';
 
 // ─── Models ─────────────────────────────────────────────────────────────────
@@ -33,12 +35,12 @@ class BorrowedItem {
     return BorrowedItem(
       itemTypeId: json['item_type_id'] as String,
       bucketId: json['bucket_id'] as String,
-      itemName: json['item_name'] as String,
-      itemEmoji: json['item_emoji'] as String,
-      bucketName: json['bucket_name'] as String,
+      itemName: json['item_name'] as String? ?? 'Unknown',
+      itemEmoji: json['item_emoji'] as String? ?? '📦',
+      bucketName: json['bucket_name'] as String? ?? 'Unknown',
       bucketBarcode: json['bucket_barcode'] as String? ?? '',
       borrowed: json['borrowed'] as int,
-      itemTotalQuantity: json['item_total_quantity'] as int,
+      itemTotalQuantity: json['item_total_quantity'] as int? ?? 0,
       checkedOutAt: json['checked_out_at'] as String?,
     );
   }
@@ -54,6 +56,7 @@ class ReturnHistoryItem {
     required this.itemEmoji,
     required this.bucketName,
     required this.bucketBarcode,
+    required this.managedBy,
     required this.quantity,
     required this.status,
   });
@@ -66,6 +69,7 @@ class ReturnHistoryItem {
   final String itemEmoji;
   final String bucketName;
   final String bucketBarcode;
+  final String managedBy;
   final int quantity;
   final String status;
 
@@ -75,10 +79,11 @@ class ReturnHistoryItem {
       createdAt: json['created_at'] as String,
       itemTypeId: json['item_type_id'] as String,
       bucketId: json['bucket_id'] as String,
-      itemName: json['item_name'] as String,
-      itemEmoji: json['item_emoji'] as String,
-      bucketName: json['bucket_name'] as String,
+      itemName: json['item_name'] as String? ?? 'Unknown',
+      itemEmoji: json['item_emoji'] as String? ?? '📦',
+      bucketName: json['bucket_name'] as String? ?? 'Unknown',
       bucketBarcode: json['bucket_barcode'] as String? ?? '',
+      managedBy: json['managed_by'] as String? ?? 'Unknown',
       quantity: json['quantity'] as int,
       status: json['status'] as String? ?? 'normal',
     );
@@ -148,8 +153,11 @@ class TransactionsNotifier extends AsyncNotifier<MyTransactionsState> {
     final txId =
         (res['data'] as Map<String, dynamic>)['transaction_id'] as String;
 
-    // Refresh state to reflect new borrowings
+    // Refresh own state
     ref.invalidateSelf();
+
+    // Refresh Me page so new borrowed items show immediately
+    ref.read(meProvider.notifier).refresh();
 
     return txId;
   }
@@ -166,8 +174,11 @@ class TransactionsNotifier extends AsyncNotifier<MyTransactionsState> {
     final txId =
         (res['data'] as Map<String, dynamic>)['transaction_id'] as String;
 
-    // Refresh state
+    // Refresh own state
     ref.invalidateSelf();
+
+    // Refresh Me page so returned items show immediately
+    ref.read(meProvider.notifier).refresh();
 
     return txId;
   }

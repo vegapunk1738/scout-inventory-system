@@ -9,6 +9,7 @@ import 'package:scout_stock/data/api/api_client.dart';
 import 'package:scout_stock/domain/models/bucket.dart';
 import 'package:scout_stock/presentation/widgets/app_toast.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
+import 'package:scout_stock/presentation/widgets/resolve_borrowed_helper.dart';
 import 'package:scout_stock/state/providers/buckets_provider.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 import 'package:scout_stock/router/app_routes.dart';
@@ -16,7 +17,6 @@ import 'package:scout_stock/presentation/pages/admin/bucket_upsert_page.dart';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/// Formats a UTC ISO string to local "Mar 14, 2026 · 11:20 PM".
 String _formatCreatedAt(String isoString) {
   final dt = DateTime.parse(isoString).toLocal();
 
@@ -73,6 +73,9 @@ class _BucketManagementAdminPageState
   final _searchCtrl = TextEditingController();
   String _query = '';
   bool _printing = false;
+
+  /// Which bucket is currently being fetched for editing (shows spinner).
+  String? _loadingBucketId;
 
   @override
   void dispose() {
@@ -134,12 +137,29 @@ class _BucketManagementAdminPageState
         },
       ),
     );
+
+    if (mounted) ref.read(bucketsProvider.notifier).refresh();
   }
 
   Future<void> _openEditBucket(Bucket bucket) async {
+    if (_loadingBucketId != null) return; // already loading one
+
     final notifier = ref.read(bucketsProvider.notifier);
 
-    final seeds = bucket.items
+    // Show spinner on the Edit button
+    setState(() => _loadingBucketId = bucket.id);
+
+    Bucket fresh;
+    try {
+      fresh = await notifier.fetchByBarcode(bucket.barcode);
+    } catch (_) {
+      fresh = bucket;
+    }
+
+    if (!mounted) return;
+    setState(() => _loadingBucketId = null);
+
+    final seeds = fresh.items
         .map((i) => BucketContentSeed(
               id: i.id,
               name: i.name,
@@ -150,32 +170,32 @@ class _BucketManagementAdminPageState
         .toList();
 
     final args = BucketUpsertArgs(
-      bucketId: bucket.id,
-      barcode: bucket.barcode,
-      name: bucket.name,
+      bucketId: fresh.id,
+      barcode: fresh.barcode,
+      name: fresh.name,
       contents: seeds,
       onSubmit: (result) async {
-        final newName = (result['name'] as String?) ?? bucket.name;
+        final newName = (result['name'] as String?) ?? fresh.name;
         final contents =
             (result['contents'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
         final updated = await notifier.updateBucket(
-          bucket.id,
+          fresh.id,
           name: newName,
           items: contents,
         );
 
         if (mounted) {
           final changes = <String>[];
-          if (newName != bucket.name) changes.add('${bucket.name} → $newName');
-          if (updated.items.length != bucket.items.length) {
+          if (newName != fresh.name) changes.add('${fresh.name} → $newName');
+          if (updated.items.length != fresh.items.length) {
             changes
-                .add('${bucket.items.length} → ${updated.items.length} items');
+                .add('${fresh.items.length} → ${updated.items.length} items');
           } else {
             changes.add('Items updated');
           }
 
-          final displayName = newName != bucket.name ? newName : bucket.name;
+          final displayName = newName != fresh.name ? newName : fresh.name;
           AppToast.of(context).show(AppToastData.success(
             title: 'Updated: $displayName',
             subtitle: changes.join('  ·  '),
@@ -185,53 +205,115 @@ class _BucketManagementAdminPageState
     );
 
     await context.push<void>(
-      AppRoutes.adminBucketEdit(bucket.barcode),
+      AppRoutes.adminBucketEdit(fresh.barcode),
       extra: args,
     );
+
+    if (mounted) ref.read(bucketsProvider.notifier).refresh();
   }
 
   Future<void> _confirmDelete(Bucket bucket) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete bucket?'),
-        content: Text(
-          'This will remove "${bucket.name}" (#${bucket.barcode}).\n\n'
-          'Inventory history stays in the audit log, but the bucket will '
-          'no longer be available to scan.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+    final hasBorrowed = bucket.items.any((i) => i.borrowed > 0);
+
+    if (hasBorrowed) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Resolve borrowed items'),
+          content: Text(
+            '"${bucket.name}" has items that are currently borrowed.\n\n'
+            'You need to resolve what happened to each borrowed item '
+            'before the bucket can be deleted.',
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFD92D20),
-              foregroundColor: Colors.white,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
             ),
-            child: const Text('Delete'),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFDC6803),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Resolve & Delete'),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted || ok != true) return;
+
+      try {
+        final notifier = ref.read(bucketsProvider.notifier);
+        final allResolved = await resolveAllBorrowedItems(
+          context: context,
+          bucketId: bucket.id,
+          items: bucket.items,
+          notifier: notifier,
+        );
+
+        if (!allResolved || !mounted) return;
+
+        await notifier.deleteBucket(bucket.id);
+        if (!mounted) return;
+
+        final itemLabel = bucket.items.length == 1
+            ? '1 item'
+            : '${bucket.items.length} items';
+        AppToast.of(context).show(AppToastData.success(
+          title: 'Deleted: ${bucket.name}',
+          subtitle:
+              '#${bucket.barcode}  ·  $itemLabel cleared  ·  Borrowed items resolved',
+        ));
+      } catch (e) {
+        if (!mounted) return;
+        _showError(e, action: 'Could not delete ${bucket.name}');
+      }
+    } else {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Delete bucket?'),
+          content: Text(
+            'This will remove "${bucket.name}" (#${bucket.barcode}).\n\n'
+            'Inventory history stays in the audit log, but the bucket will '
+            'no longer be available to scan.',
           ),
-        ],
-      ),
-    );
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFD92D20),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      );
 
-    if (!mounted || ok != true) return;
+      if (!mounted || ok != true) return;
 
-    try {
-      await ref.read(bucketsProvider.notifier).deleteBucket(bucket.id);
-      if (!mounted) return;
+      try {
+        await ref.read(bucketsProvider.notifier).deleteBucket(bucket.id);
+        if (!mounted) return;
 
-      final itemLabel =
-          bucket.items.length == 1 ? '1 item' : '${bucket.items.length} items';
-      AppToast.of(context).show(AppToastData.success(
-        title: 'Deleted: ${bucket.name}',
-        subtitle: '#${bucket.barcode}  ·  $itemLabel cleared',
-      ));
-    } catch (e) {
-      if (!mounted) return;
-      _showError(e, action: 'Could not delete ${bucket.name}');
+        final itemLabel = bucket.items.length == 1
+            ? '1 item'
+            : '${bucket.items.length} items';
+        AppToast.of(context).show(AppToastData.success(
+          title: 'Deleted: ${bucket.name}',
+          subtitle: '#${bucket.barcode}  ·  $itemLabel cleared',
+        ));
+      } catch (e) {
+        if (!mounted) return;
+        _showError(e, action: 'Could not delete ${bucket.name}');
+      }
     }
   }
 
@@ -422,6 +504,7 @@ class _BucketManagementAdminPageState
                                 child: _BucketCard(
                                   bucket: b,
                                   radiusXl: tokens.radiusXl,
+                                  editLoading: _loadingBucketId == b.id,
                                   onEdit: () => _openEditBucket(b),
                                   onPrint: () => _printBucketLabel(b),
                                   onDelete: () => _confirmDelete(b),
@@ -518,6 +601,7 @@ class _BucketCard extends StatelessWidget {
   const _BucketCard({
     required this.bucket,
     required this.radiusXl,
+    required this.editLoading,
     required this.onEdit,
     required this.onPrint,
     required this.onDelete,
@@ -525,6 +609,7 @@ class _BucketCard extends StatelessWidget {
 
   final Bucket bucket;
   final double radiusXl;
+  final bool editLoading;
   final VoidCallback onEdit, onPrint, onDelete;
 
   @override
@@ -534,7 +619,6 @@ class _BucketCard extends StatelessWidget {
 
     final nameStyle = t.titleMedium?.copyWith(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.ink);
     final idStyle = t.bodyMedium?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w700);
-    final metaStyle = t.bodyMedium?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w700);
 
     final labelStyle = t.bodySmall?.copyWith(color: AppColors.muted, fontWeight: FontWeight.w600, fontSize: 10.5, height: 1.2);
     final valueStyle = t.bodySmall?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w700, fontSize: 11, height: 1.2);
@@ -556,7 +640,6 @@ class _BucketCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
               child: Column(
                 children: [
-                  // Name + stock pill
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -566,12 +649,8 @@ class _BucketCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 6),
-
-                  // Barcode
                   Align(alignment: Alignment.centerLeft, child: Text('#${bucket.barcode}', style: idStyle)),
                   const SizedBox(height: 14),
-
-                  // Created by + created at row
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -614,7 +693,13 @@ class _BucketCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
               child: Row(
                 children: [
-                  Expanded(child: _CardActionButton(label: 'Edit', onPressed: onEdit)),
+                  Expanded(
+                    child: _CardActionButton(
+                      label: 'Edit',
+                      loading: editLoading,
+                      onPressed: onEdit,
+                    ),
+                  ),
                   const SizedBox(width: 10),
                   Expanded(child: _CardActionButton(label: 'Print Label', onPressed: onPrint)),
                   const SizedBox(width: 10),
@@ -632,10 +717,16 @@ class _BucketCard extends StatelessWidget {
 enum _CardActionVariant { neutral, danger }
 
 class _CardActionButton extends StatelessWidget {
-  const _CardActionButton({required this.label, required this.onPressed, this.variant = _CardActionVariant.neutral});
+  const _CardActionButton({
+    required this.label,
+    required this.onPressed,
+    this.variant = _CardActionVariant.neutral,
+    this.loading = false,
+  });
   final String label;
   final VoidCallback onPressed;
   final _CardActionVariant variant;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -647,9 +738,30 @@ class _CardActionButton extends StatelessWidget {
       color: bg,
       borderRadius: BorderRadius.circular(tokens.radiusLg),
       child: InkWell(
-        onTap: onPressed,
+        onTap: loading ? null : onPressed,
         borderRadius: BorderRadius.circular(tokens.radiusLg),
-        child: SizedBox(height: 46, child: Center(child: Text(label, style: t.titleMedium?.copyWith(fontSize: 14, fontWeight: FontWeight.w800, color: fg)))),
+        child: SizedBox(
+          height: 46,
+          child: Center(
+            child: loading
+                ? SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.4,
+                      color: fg,
+                    ),
+                  )
+                : Text(
+                    label,
+                    style: t.titleMedium?.copyWith(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: fg,
+                    ),
+                  ),
+          ),
+        ),
       ),
     );
   }

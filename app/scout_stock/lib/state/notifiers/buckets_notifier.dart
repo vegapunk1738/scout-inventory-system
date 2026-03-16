@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:scout_stock/data/api/api_client.dart';
 import 'package:scout_stock/domain/models/bucket.dart';
 import 'package:scout_stock/state/providers/api_provider.dart';
+import 'package:scout_stock/state/providers/me_provider.dart';
 
 /// Manages the admin bucket list.
 ///
@@ -28,9 +29,6 @@ class BucketsNotifier extends AsyncNotifier<List<Bucket>> {
 
   // ── Create ─────────────────────────────────────────────────────────────
 
-  /// Creates a bucket with items. Returns the created bucket.
-  ///
-  /// The backend auto-generates a unique barcode from the abbreviation.
   Future<Bucket> createBucket({
     required String name,
     required String abbreviation,
@@ -48,10 +46,6 @@ class BucketsNotifier extends AsyncNotifier<List<Bucket>> {
 
   // ── Update ─────────────────────────────────────────────────────────────
 
-  /// Updates a bucket. Returns the updated bucket.
-  ///
-  /// Throws [ApiException] with 409 if quantity decrease is blocked
-  /// by currently borrowed items.
   Future<Bucket> updateBucket(
     String bucketId, {
     String? name,
@@ -109,8 +103,6 @@ class BucketsNotifier extends AsyncNotifier<List<Bucket>> {
 
   // ── Resolve borrowed items (admin resolution flow) ────────────────────
 
-  /// Resolves borrowed items for an item type. Each resolution creates a
-  /// return transaction with the appropriate status.
   Future<void> resolveBorrowed(
     String bucketId,
     String itemTypeId, {
@@ -121,8 +113,13 @@ class BucketsNotifier extends AsyncNotifier<List<Bucket>> {
       body: {'resolutions': resolutions},
     );
 
-    // Invalidate state to trigger a re-fetch
+    // Invalidate bucket list to re-fetch updated borrowed counts
     ref.invalidateSelf();
+
+    // Refresh Me page via .refresh() — NOT invalidate() — so the
+    // user's current filter mode (Borrowed/Returned/All) is preserved
+    // and there's no flash of empty state.
+    ref.read(meProvider.notifier).refresh();
   }
 
   // ── Refresh ────────────────────────────────────────────────────────────

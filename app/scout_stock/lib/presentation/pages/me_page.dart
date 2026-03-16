@@ -674,11 +674,12 @@ List<_MeRow> _buildRows({
         .where((x) => x.kind == _MeRowKind.returned)
         .toList();
 
+    // Sort by most recent first (not alphabetically)
     borrowedRows.sort(
-      (a, b) => a.borrowed!.item.name.compareTo(b.borrowed!.item.name),
+      (a, b) => b.borrowed!.checkedOutAt.compareTo(a.borrowed!.checkedOutAt),
     );
     returnedRows.sort(
-      (a, b) => a.returned!.item.name.compareTo(b.returned!.item.name),
+      (a, b) => b.returned!.returnedAt.compareTo(a.returned!.returnedAt),
     );
 
     rows.addAll(borrowedRows);
@@ -883,7 +884,7 @@ class _BorrowedCard extends StatelessWidget {
   }
 }
 
-// ─── Returned card ──────────────────────────────────────────────────────────
+// ─── Returned card (with status badges) ─────────────────────────────────────
 
 class _ReturnedCard extends StatelessWidget {
   const _ReturnedCard({
@@ -912,11 +913,42 @@ class _ReturnedCard extends StatelessWidget {
     final emojiSize = compact ? 22.0 : 26.0;
     final item = record.item;
 
+    // ── Status badge config ───────────────────────────────────────
+    final isLost = record.status == 'lost';
+    final isDamaged = record.status == 'damaged';
+    final hasStatusBadge = isLost || isDamaged;
+
+    Color statusColor;
+    Color statusBg;
+    String statusLabel;
+    IconData statusIcon;
+
+    if (isLost) {
+      statusColor = const Color(0xFFD92D20);
+      statusBg = const Color(0xFFFEF3F2);
+      statusLabel = 'Lost';
+      statusIcon = Icons.help_outline_rounded;
+    } else if (isDamaged) {
+      statusColor = const Color(0xFFDC6803);
+      statusBg = const Color(0xFFFFF3D6);
+      statusLabel = 'Broken';
+      statusIcon = Icons.broken_image_rounded;
+    } else {
+      statusColor = AppColors.primary;
+      statusBg = AppColors.successBg;
+      statusLabel = 'Returned';
+      statusIcon = Icons.check_circle_rounded;
+    }
+
     final base = Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(tokens.radiusXl),
         boxShadow: shadow,
+        border: hasStatusBadge
+            ? Border.all(
+                color: statusColor.withValues(alpha: 0.25), width: 1.5)
+            : null,
       ),
       padding: EdgeInsets.all(compact ? 10 : 12),
       child: Column(
@@ -928,9 +960,13 @@ class _ReturnedCard extends StatelessWidget {
                 width: tile,
                 height: tile,
                 decoration: BoxDecoration(
-                  color: AppColors.background,
+                  color: hasStatusBadge ? statusBg : AppColors.background,
                   borderRadius: BorderRadius.circular(tokens.radiusLg),
-                  border: Border.all(color: AppColors.outline),
+                  border: Border.all(
+                    color: hasStatusBadge
+                        ? statusColor.withValues(alpha: 0.2)
+                        : AppColors.outline,
+                  ),
                 ),
                 alignment: Alignment.center,
                 child: Text(
@@ -983,11 +1019,31 @@ class _ReturnedCard extends StatelessWidget {
               ),
             ],
           ),
-          SizedBox(height: compact ? 10 : 12),
-          _ReturnedQtyBar(
-            returned: item.quantity,
-            max: item.maxQuantity,
-            compact: compact,
+          SizedBox(height: compact ? 8 : 10),
+
+          // ── Status badge row ────────────────────────────────────────
+          Container(
+            height: compact ? 36 : 40,
+            decoration: BoxDecoration(
+              color: statusBg,
+              borderRadius: BorderRadius.circular(tokens.radiusLg),
+              border: Border.all(color: statusColor.withValues(alpha: 0.15)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(statusIcon, size: 16, color: statusColor),
+                const SizedBox(width: 6),
+                Text(
+                  '$statusLabel  ·  ${item.quantity} item${item.quantity != 1 ? 's' : ''}',
+                  style: textTheme.titleMedium?.copyWith(
+                    fontSize: compact ? 12 : 13,
+                    fontWeight: FontWeight.w800,
+                    color: statusColor,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1092,53 +1148,6 @@ class _ReturnQtyStepperHold extends StatelessWidget {
                 : null,
           ),
           const SizedBox(width: 6),
-        ],
-      ),
-    );
-  }
-}
-
-class _ReturnedQtyBar extends StatelessWidget {
-  const _ReturnedQtyBar({
-    required this.returned,
-    required this.max,
-    required this.compact,
-  });
-  final int returned, max;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = Theme.of(context).extension<AppTokens>()!;
-    final t = Theme.of(context).textTheme;
-    final height = compact ? 50.0 : 56.0;
-    return Container(
-      height: height,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(tokens.radiusLg),
-        border: Border.all(color: AppColors.outline),
-      ),
-      alignment: Alignment.center,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '$returned',
-            style: (compact ? t.titleLarge : t.headlineSmall)?.copyWith(
-              fontWeight: FontWeight.w900,
-              height: 1,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            'of $max returned',
-            style: t.bodySmall?.copyWith(
-              color: AppColors.muted,
-              fontWeight: FontWeight.w700,
-              height: 1,
-            ),
-          ),
         ],
       ),
     );

@@ -109,6 +109,8 @@ class MeNotifier extends Notifier<MeState> {
     );
   }
 
+  /// Fetches data from API and updates state via copyWith —
+  /// this preserves the current [mode] and [submitting] flags.
   Future<void> _fetchData() async {
     try {
       final res = await _api.get('/transactions/me');
@@ -135,12 +137,10 @@ class MeNotifier extends Notifier<MeState> {
           item: Item(
             id: b['item_type_id'] as String,
             name: b['item_name'] as String,
-            bucketId: bucketId,             // ← UUID for API calls
-            bucketBarcode: bucketBarcode,    // ← SSB-XXX-XXX for display
+            bucketId: bucketId,
+            bucketBarcode: bucketBarcode,
             bucketName: b['bucket_name'] as String,
-            // quantity = how many user wants to return (starts at 0)
             quantity: 0,
-            // maxQuantity = total borrowed by this user
             maxQuantity: borrowedQty,
             emoji: b['item_emoji'] as String,
           ),
@@ -212,7 +212,7 @@ class MeNotifier extends Notifier<MeState> {
           .where((r) => r.item.quantity > 0)
           .map(
             (r) => {
-              'bucket_id': r.item.bucketId,   // ← UUID, not barcode
+              'bucket_id': r.item.bucketId,
               'item_type_id': r.item.id,
               'quantity': r.item.quantity,
             },
@@ -222,19 +222,17 @@ class MeNotifier extends Notifier<MeState> {
       final txNotifier = ref.read(transactionsProvider.notifier);
       final txnId = await txNotifier.returnItems(itemsToReturn);
 
-      // Refresh data from API
-      await _fetchData();
+      // NOTE: TransactionsNotifier.returnItems() already calls
+      // ref.read(meProvider.notifier).refresh() which triggers _fetchData().
+      // So we don't need to call _fetchData() again here — it would be a
+      // wasteful double fetch. Just wait a tick for the refresh to land.
 
       return (ok: true, txnId: txnId, error: null);
     } on ApiException catch (e) {
       String errorMsg;
       if (e.isConflict) {
-        // 409 — trying to return more than borrowed
         errorMsg = e.message;
       } else if (e.isNotFound) {
-        // 404 — item or bucket was deleted, but return should still work
-        // via the backend's lenient handling. If we still get 404, it means
-        // the user never had this item checked out.
         errorMsg = 'This item is no longer in the system. '
             'Please contact an admin.';
       } else {
@@ -248,6 +246,8 @@ class MeNotifier extends Notifier<MeState> {
     }
   }
 
+  /// Refreshes data from API without going through build() —
+  /// preserves the current filter mode and avoids empty-state flash.
   Future<void> refresh() async {
     state = state.copyWith(loading: true);
     await _fetchData();

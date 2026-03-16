@@ -5,18 +5,6 @@ import 'package:scout_stock/theme/app_theme.dart';
 // ═══════════════════════════════════════════════════════════════════════════
 // AppToast — Z-stacked, bottom-anchored, non-blocking notifications
 // ═══════════════════════════════════════════════════════════════════════════
-//
-// Toasts stack on the Z-axis like a deck of cards above the nav bar.
-// The newest toast is in front at full scale. Older toasts peek out
-// behind — slightly scaled down, shifted up, and dimmed.
-//
-// Usage:
-//   AppToast.of(context).show(AppToastData.success(
-//     title: 'User Created',
-//     subtitle: 'Ahmad  ·  ID #1287',
-//   ));
-
-// ── Data model ───────────────────────────────────────────────────────────
 
 enum AppToastType { success, error }
 
@@ -56,8 +44,6 @@ class AppToastData {
   final Duration duration;
 }
 
-// ── Entry ────────────────────────────────────────────────────────────────
-
 class _ToastEntry {
   _ToastEntry({required this.data}) : id = _nextId++;
   static int _nextId = 0;
@@ -65,8 +51,6 @@ class _ToastEntry {
   final int id;
   final AppToastData data;
 }
-
-// ── Controller ───────────────────────────────────────────────────────────
 
 class AppToastController {
   AppToastController._();
@@ -82,8 +66,6 @@ class AppToastController {
     _overlayState?._addToast(_ToastEntry(data: data));
   }
 }
-
-// ── InheritedWidget ──────────────────────────────────────────────────────
 
 class AppToast extends InheritedWidget {
   const AppToast({super.key, required this.controller, required super.child});
@@ -101,7 +83,7 @@ class AppToast extends InheritedWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Overlay — place once at top of tree
+// Overlay
 // ═══════════════════════════════════════════════════════════════════════════
 
 class AppToastOverlay extends StatefulWidget {
@@ -112,8 +94,6 @@ class AppToastOverlay extends StatefulWidget {
   });
 
   final Widget child;
-
-  /// Total bottom nav area height (bar + padding). Toasts sit above this.
   final double navBarHeight;
 
   @override
@@ -124,12 +104,10 @@ class _AppToastOverlayState extends State<AppToastOverlay>
     with TickerProviderStateMixin {
   final _controller = AppToastController._();
 
-  /// Ordered newest-first. Index 0 = front card.
   final _toasts = <_LiveToast>[];
 
   static const _maxVisible = 4;
 
-  // Z-stack layout constants
   static const _stackOffsetY = 10.0;
   static const _stackScale = 0.04;
   static const _stackOpacity = 0.18;
@@ -225,7 +203,7 @@ class _AppToastOverlayState extends State<AppToastOverlay>
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Live toast — owns animation controllers + auto-dismiss timer
+// Live toast
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _LiveToast {
@@ -268,7 +246,7 @@ class _LiveToast {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Animated Z-card — positions each card at its depth
+// Animated Z-card
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _AnimatedZCard extends StatelessWidget {
@@ -303,7 +281,6 @@ class _AnimatedZCard extends StatelessWidget {
       builder: (context, child) {
         final progress = entrance.value;
 
-        // Front card slides up from below. Behind cards sit still.
         final slideY = isFront ? 60.0 * (1.0 - progress) : 0.0;
         final fadeIn = isFront ? progress : 1.0;
 
@@ -356,11 +333,18 @@ class _ToastCard extends StatelessWidget {
     final accentBg = accent.withValues(alpha: 0.08);
     final icon = isSuccess ? Icons.check_circle_rounded : Icons.error_rounded;
 
+    final borderColor = accent.withValues(alpha: 0.15);
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: accent.withValues(alpha: 0.15)),
+        // No left border — the accent strip fills flush to the clipped edge
+        border: Border(
+          top: BorderSide(color: borderColor),
+          right: BorderSide(color: borderColor),
+          bottom: BorderSide(color: borderColor),
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.08),
