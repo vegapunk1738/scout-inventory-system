@@ -241,7 +241,11 @@ userRoutes.post("/", async (c) => {
     entity_id: row.id,
     action: "created",
     summary: `Created user "${body.full_name}" (Scout #${scoutId})`,
-    meta: { scout_id: scoutId, role: body.role },
+    meta: {
+      full_name: body.full_name,
+      scout_id: scoutId,
+      role: body.role,
+    },
   });
 
   return c.json({ data: sanitize(row) }, 201);
@@ -286,6 +290,18 @@ userRoutes.patch("/:identifier", async (c) => {
       .returning()
   )[0];
 
+  // Build a changes array describing exactly what was modified
+  const changes: string[] = [];
+  if (body.full_name && body.full_name !== existing.full_name) {
+    changes.push(`name: "${existing.full_name}" → "${body.full_name}"`);
+  }
+  if (body.role && body.role !== existing.role) {
+    changes.push(`role: ${existing.role} → ${body.role}`);
+  }
+  if (body.password) {
+    changes.push("password changed");
+  }
+
   await writeAuditLog(db, {
     actor_id: c.get("jwtPayload").sub,
     entity: "user",
@@ -293,7 +309,10 @@ userRoutes.patch("/:identifier", async (c) => {
     action: "updated",
     summary: `Updated user "${updated.full_name}" (Scout #${existing.scout_id})`,
     meta: {
-      fields_changed: Object.keys(body).filter((k) => k !== "password"),
+      full_name: updated.full_name,
+      scout_id: existing.scout_id,
+      role: updated.role,
+      changes,
     },
   });
 
@@ -327,6 +346,11 @@ userRoutes.delete("/:identifier", async (c) => {
     entity_id: existing.id,
     action: "deleted",
     summary: `Deleted user "${existing.full_name}" (Scout #${existing.scout_id})`,
+    meta: {
+      full_name: existing.full_name,
+      scout_id: existing.scout_id,
+      role: existing.role,
+    },
   });
 
   return c.json({ message: "User deleted" });

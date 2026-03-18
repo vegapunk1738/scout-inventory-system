@@ -355,7 +355,16 @@ bucketRoutes.post("/", requireRole("admin"), async (c) => {
     entity_id: bucketId,
     action: "created",
     summary: `Created bucket "${body.name}" (${barcode})`,
-    meta: { barcode, item_count: body.items.length },
+    meta: {
+      name: body.name,
+      barcode,
+      item_count: insertedItems.length,
+      items: insertedItems.map((i: any) => ({
+        name: i.name,
+        emoji: i.emoji,
+        quantity: i.quantity,
+      })),
+    },
   });
 
   return c.json(
@@ -385,6 +394,12 @@ bucketRoutes.patch("/:id", requireRole("admin"), async (c) => {
   )[0];
   if (!existing) throw new NotFoundError("Bucket");
 
+  // Snapshot existing items before mutations (for change tracking)
+  const existingItems = await db
+    .select()
+    .from(item_types)
+    .where(eq(item_types.bucket_id, id));
+
   // Update bucket name if provided
   if (body.name) {
     await db.update(buckets).set({ name: body.name }).where(eq(buckets.id, id));
@@ -392,11 +407,6 @@ bucketRoutes.patch("/:id", requireRole("admin"), async (c) => {
 
   // Update items if provided
   if (body.items) {
-    const existingItems = await db
-      .select()
-      .from(item_types)
-      .where(eq(item_types.bucket_id, id));
-
     const existingIds = new Set(existingItems.map((i) => i.id));
     const incomingIds = new Set(
       body.items.filter((i) => i.id).map((i) => i.id!)
@@ -500,13 +510,37 @@ bucketRoutes.patch("/:id", requireRole("admin"), async (c) => {
     })
   );
 
+  // Build a changes array describing what was modified
+  const changes: string[] = [];
+  if (body.name && body.name !== existing.name) {
+    changes.push(`name: "${existing.name}" → "${body.name}"`);
+  }
+  if (body.items) {
+    const oldCount = existingItems.length;
+    const newCount = items.length;
+    if (newCount !== oldCount) {
+      changes.push(`items: ${oldCount} → ${newCount}`);
+    } else {
+      changes.push("items updated");
+    }
+  }
+
   await writeAuditLog(db, {
     actor_id: c.get("jwtPayload").sub,
     entity: "bucket",
     entity_id: id,
     action: "updated",
     summary: `Updated bucket "${body.name ?? existing.name}"`,
-    meta: { name: body.name, items_changed: !!body.items },
+    meta: {
+      name: body.name ?? existing.name,
+      barcode: existing.barcode,
+      changes,
+      items: itemsWithAvailable.map((i: any) => ({
+        name: i.name,
+        emoji: i.emoji,
+        quantity: i.quantity,
+      })),
+    },
   });
 
   return c.json({
@@ -604,6 +638,7 @@ bucketRoutes.post(
         id: txId,
         type: "return",
         user_id: resolution.user_id,
+        performed_by: jwt.sub,
         created_at: now,
         idempotency_key: idempotencyKey,
       });
@@ -639,22 +674,6 @@ bucketRoutes.post(
         .set({ quantity: newQuantity })
         .where(eq(item_types.id, itemId));
     }
-
-    await writeAuditLog(db, {
-      actor_id: c.get("jwtPayload").sub,
-      entity: "item",
-      entity_id: itemId,
-      action: "resolved",
-      summary: `Resolved "${item.name}" — ${body.resolutions.length} resolution(s)`,
-      meta: {
-        bucket_id: bucketId,
-        resolutions: body.resolutions.map((r) => ({
-          user_id: r.user_id,
-          quantity: r.quantity,
-          status: r.status,
-        })),
-      },
-    });
 
     return c.json({
       data: {
@@ -749,6 +768,11 @@ bucketRoutes.delete("/:id", requireRole("admin"), async (c) => {
     entity_id: id,
     action: "deleted",
     summary: `Deleted bucket "${existing.name}" (${existing.barcode})`,
+    meta: {
+      name: existing.name,
+      barcode: existing.barcode,
+      item_count: items.length,
+    },
   });
 
   return c.json({ message: "Bucket deleted" });

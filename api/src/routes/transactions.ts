@@ -236,7 +236,7 @@ transactionRoutes.post("/checkout", async (c) => {
   // Insert transaction header
   statements.push(
     d1.prepare(
-      `INSERT INTO transactions (id, type, user_id, created_at, idempotency_key) VALUES (?1, 'checkout', ?2, ?3, ?4)`
+      `INSERT INTO transactions (id, type, user_id, performed_by, created_at, idempotency_key) VALUES (?1, 'checkout', ?2, ?2, ?3, ?4)`
     ).bind(txId, jwt.sub, now, body.idempotency_key)
   );
 
@@ -293,7 +293,7 @@ transactionRoutes.post("/checkout", async (c) => {
       const reversalId = crypto.randomUUID();
       const reversalStatements: D1PreparedStatement[] = [
         d1.prepare(
-          `INSERT INTO transactions (id, type, user_id, created_at, idempotency_key) VALUES (?1, 'return', ?2, ?3, ?4)`
+          `INSERT INTO transactions (id, type, user_id, performed_by, created_at, idempotency_key) VALUES (?1, 'return', ?2, ?2, ?3, ?4)`
         ).bind(
           reversalId,
           jwt.sub,
@@ -429,7 +429,7 @@ transactionRoutes.post("/return", async (c) => {
 
   statements.push(
     d1.prepare(
-      `INSERT INTO transactions (id, type, user_id, created_at, idempotency_key) VALUES (?1, 'return', ?2, ?3, ?4)`
+      `INSERT INTO transactions (id, type, user_id, performed_by, created_at, idempotency_key) VALUES (?1, 'return', ?2, ?2, ?3, ?4)`
     ).bind(txId, jwt.sub, now, body.idempotency_key)
   );
 

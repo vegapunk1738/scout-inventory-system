@@ -266,7 +266,7 @@ class _ResolutionSheetBodyState extends State<_ResolutionSheetBody> {
             Flexible(
               child: ListView.separated(
                 shrinkWrap: true, itemCount: _drafts.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                separatorBuilder: (_, _) => const SizedBox(height: 12),
                 itemBuilder: (context, i) => _BorrowerResolutionCard(
                   draft: _drafts[i], globalTarget: target, globalAssigned: totalAssigned,
                   compact: compact, tokens: tokens, textTheme: t, onChanged: () => setState(() {}),
@@ -381,7 +381,9 @@ class _BulkResolutionSheetBodyState extends State<_BulkResolutionSheetBody> {
     final map = <String, List<Map<String, dynamic>>>{};
     for (final group in _itemDrafts) {
       final resolutions = <Map<String, dynamic>>[];
-      for (final d in group.drafts) resolutions.addAll(d.toResolutions());
+      for (final d in group.drafts) {
+        resolutions.addAll(d.toResolutions());
+      }
       map[group.itemId] = resolutions;
     }
     Navigator.of(context).pop(BulkResolutionResult(resolutionsByItemId: map));

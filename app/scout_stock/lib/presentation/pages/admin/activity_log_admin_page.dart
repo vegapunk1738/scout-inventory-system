@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -65,7 +64,6 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
     const navPad = 12.0;
     final bottomFootprint = safeBottom + navHeight + navPad + 10;
 
-    // Build grouped rows
     final rows = _buildRows(state.entries);
 
     return Scaffold(
@@ -79,17 +77,13 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
               controller: _scrollCtrl,
               cacheExtent: 900,
               slivers: [
-                // ── Header ────────────────────────────────────────────
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
-                    child: _ActivityHeader(
-                      newCount: state.newEntryIds.length,
-                    ),
+                    child: _ActivityHeader(newCount: state.newEntryIds.length),
                   ),
                 ),
 
-                // ── Sticky search ─────────────────────────────────────
                 SliverPersistentHeader(
                   pinned: true,
                   delegate: _StickyHeaderDelegate(
@@ -105,30 +99,16 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
                   ),
                 ),
 
-                // ── Entity filter chips ───────────────────────────────
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                    child: _EntityFilterRow(
-                      selected: state.entityFilter,
-                      onTap: notifier.setEntityFilter,
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+                    child: _UnifiedFilterRow(
+                      selected: state.filter,
+                      onTap: notifier.setFilter,
                     ),
                   ),
                 ),
 
-                // ── Action filter chips ───────────────────────────────
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                    child: _ActionFilterRow(
-                      entityFilter: state.entityFilter,
-                      selected: state.actionFilter,
-                      onTap: notifier.setActionFilter,
-                    ),
-                  ),
-                ),
-
-                // ── Content ───────────────────────────────────────────
                 if (state.loading)
                   const SliverFillRemaining(
                     hasScrollBody: false,
@@ -183,7 +163,6 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
                     ),
                   ),
 
-                // ── Footer loading / end ──────────────────────────────
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
@@ -230,13 +209,11 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
 
 class _ActivityHeader extends StatelessWidget {
   const _ActivityHeader({required this.newCount});
-
   final int newCount;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -269,7 +246,6 @@ class _ActivityHeader extends StatelessWidget {
   }
 }
 
-/// Pulsing green dot indicating live polling has new data.
 class _LiveDot extends StatefulWidget {
   @override
   State<_LiveDot> createState() => _LiveDotState();
@@ -321,84 +297,43 @@ class _LiveDotState extends State<_LiveDot>
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Entity filter row
+// Unified filter row
 // ═══════════════════════════════════════════════════════════════════════════
 
-class _EntityFilterRow extends StatelessWidget {
-  const _EntityFilterRow({required this.selected, required this.onTap});
+class _UnifiedFilterRow extends StatelessWidget {
+  const _UnifiedFilterRow({required this.selected, required this.onTap});
 
-  final ActivityEntityFilter selected;
-  final ValueChanged<ActivityEntityFilter> onTap;
+  final ActivityFilter selected;
+  final ValueChanged<ActivityFilter> onTap;
+
+  static const _icons = <ActivityFilter, IconData>{
+    ActivityFilter.all: Icons.dashboard_rounded,
+    ActivityFilter.checkouts: Icons.arrow_upward_rounded,
+    ActivityFilter.returns: Icons.arrow_downward_rounded,
+    ActivityFilter.resolved: Icons.search_off_rounded,
+    ActivityFilter.admin: Icons.shield_rounded,
+  };
 
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      child: Row(
-        children: ActivityEntityFilter.values.map((f) {
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: _FilterChip(
-              label: f.label,
-              icon: _entityIcon(f),
-              isSelected: f == selected,
-              onTap: () => onTap(f),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  IconData _entityIcon(ActivityEntityFilter f) {
-    switch (f) {
-      case ActivityEntityFilter.all:
-        return Icons.dashboard_rounded;
-      case ActivityEntityFilter.item:
-        return Icons.inventory_2_rounded;
-      case ActivityEntityFilter.bucket:
-        return Icons.category_rounded;
-      case ActivityEntityFilter.user:
-        return Icons.people_rounded;
-    }
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Action filter row (contextual based on entity)
-// ═══════════════════════════════════════════════════════════════════════════
-
-class _ActionFilterRow extends StatelessWidget {
-  const _ActionFilterRow({
-    required this.entityFilter,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final ActivityEntityFilter entityFilter;
-  final ActivityActionFilter selected;
-  final ValueChanged<ActivityActionFilter> onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final actions = actionsForEntity(entityFilter);
-    // Don't show if only "All" is available
-    if (actions.length <= 1) return const SizedBox.shrink();
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: actions.map((a) {
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: _FilterChip(
-              label: a.label,
-              isSelected: a == selected,
-              onTap: () => onTap(a),
-              small: true,
-            ),
-          );
-        }).toList(),
+      clipBehavior: Clip.none,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: ActivityFilter.values.map((f) {
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: _FilterChip(
+                label: f.label,
+                icon: _icons[f],
+                isSelected: f == selected,
+                onTap: () => onTap(f),
+              ),
+            );
+          }).toList(),
+        ),
       ),
     );
   }
@@ -414,20 +349,16 @@ class _FilterChip extends StatelessWidget {
     required this.isSelected,
     required this.onTap,
     this.icon,
-    this.small = false,
   });
 
   final String label;
   final bool isSelected;
   final VoidCallback onTap;
   final IconData? icon;
-  final bool small;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final tokens = Theme.of(context).extension<AppTokens>()!;
-
     final bg = isSelected ? AppColors.primary : Colors.white;
     final fg = isSelected ? Colors.white : AppColors.ink;
 
@@ -435,31 +366,37 @@ class _FilterChip extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        padding: EdgeInsets.symmetric(
-          horizontal: small ? 12 : 14,
-          vertical: small ? 6 : 8,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
             color: isSelected ? AppColors.primary : AppColors.outline,
           ),
-          boxShadow: isSelected ? tokens.glowShadow : null,
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.35),
+                    blurRadius: 14,
+                    spreadRadius: 0,
+                    offset: Offset.zero,
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (icon != null) ...[
-              Icon(icon, size: small ? 14 : 16, color: fg),
+              Icon(icon, size: 16, color: fg),
               const SizedBox(width: 6),
             ],
             Text(
               label,
-              style: (small ? t.bodyMedium : t.titleMedium)?.copyWith(
+              style: t.titleMedium?.copyWith(
                 color: fg,
                 fontWeight: FontWeight.w700,
-                fontSize: small ? 12 : 13,
+                fontSize: 13,
               ),
             ),
           ],
@@ -470,7 +407,7 @@ class _FilterChip extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Search card (same as before)
+// Search card
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _SearchCard extends StatelessWidget {
@@ -559,22 +496,16 @@ class _SearchCard extends StatelessWidget {
 
 class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   _StickyHeaderDelegate({required this.height, required this.child});
-
   final double height;
   final Widget child;
 
   @override
   double get minExtent => height;
-
   @override
   double get maxExtent => height;
 
   @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
     return child;
   }
 
@@ -585,7 +516,7 @@ class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Glowing entry card — the main card with glow animation for new entries
+// Glowing entry card
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _GlowingEntryCard extends StatefulWidget {
@@ -651,20 +582,19 @@ class _GlowingEntryCardState extends State<_GlowingEntryCard>
   @override
   Widget build(BuildContext context) {
     final entry = widget.entry;
-
     return AnimatedBuilder(
       animation: _glowAnim,
       builder: (context, child) {
-        final glowValue = _glowAnim.value;
+        final v = _glowAnim.value;
         return Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(widget.radiusXl),
-            boxShadow: glowValue > 0.01
+            boxShadow: v > 0.01
                 ? [
                     BoxShadow(
-                      color: _stripColor(entry).withValues(alpha: 0.45 * glowValue),
-                      blurRadius: 20 * glowValue,
-                      spreadRadius: 2 * glowValue,
+                      color: _stripColor(entry).withValues(alpha: 0.45 * v),
+                      blurRadius: 20 * v,
+                      spreadRadius: 2 * v,
                     ),
                   ]
                 : null,
@@ -720,112 +650,122 @@ class _EntryCardContent extends StatelessWidget {
         highlightColor: Colors.transparent,
         child: Column(
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // ── Color strip ───────────────────────────────────────
-                Container(width: 6, height: 84, color: stripColor),
-                const SizedBox(width: 14),
+            // ── Main row ────────────────────────────────────────────
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // ── Color strip ─────────────────────────────────────
+                  Container(
+                    width: 6,
+                    constraints: const BoxConstraints(minHeight: 84),
+                    color: stripColor,
+                  ),
+                  const SizedBox(width: 14),
 
-                // ── Avatar + action icon ──────────────────────────────
-                Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    CircleAvatar(
-                      radius: 22,
-                      backgroundColor: AppColors.background,
-                      child: entry.isTransaction
-                          ? Text(
-                              initials,
-                              style: t.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w800,
-                              ),
-                            )
-                          : Icon(
-                              _entityIcon(entry),
-                              size: 20,
+                  // ── Avatar (pinned to top) ──────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.only(top: 18),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        CircleAvatar(
+                          radius: 22,
+                          backgroundColor: AppColors.background,
+                          child: entry.isTransaction
+                              ? Text(
+                                  initials,
+                                  style: t.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                )
+                              : Icon(
+                                  _entityIcon(entry),
+                                  size: 20,
+                                  color: stripColor,
+                                ),
+                        ),
+                        Positioned(
+                          left: -2,
+                          bottom: -2,
+                          child: Container(
+                            width: 18,
+                            height: 18,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(color: AppColors.outline),
+                            ),
+                            child: Icon(
+                              _actionIcon(entry),
+                              size: 12,
                               color: stripColor,
                             ),
+                          ),
+                        ),
+                      ],
                     ),
-                    Positioned(
-                      left: -2,
-                      bottom: -2,
-                      child: Container(
-                        width: 18,
-                        height: 18,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: AppColors.outline),
-                        ),
-                        child: Icon(
-                          _actionIcon(entry),
-                          size: 12,
-                          color: stripColor,
-                        ),
+                  ),
+                  const SizedBox(width: 12),
+
+                  // ── Text content ────────────────────────────────────
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            entry.actorName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: t.titleMedium?.copyWith(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.ink,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            entry.detailLabel,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: t.bodyMedium?.copyWith(
+                              color: AppColors.ink,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(width: 12),
+                  ),
 
-                // ── Text content ──────────────────────────────────────
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  // ── Time (pinned to top) ────────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.only(top: 14, right: 12),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          entry.actorName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.titleMedium?.copyWith(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.ink,
-                          ),
+                          timeText,
+                          style: t.bodyMedium?.copyWith(color: AppColors.muted),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          entry.actionLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.bodyMedium?.copyWith(
-                            color: AppColors.ink,
+                        if (hasDetails) ...[
+                          const SizedBox(height: 8),
+                          Icon(
+                            expanded
+                                ? Icons.keyboard_arrow_up_rounded
+                                : Icons.keyboard_arrow_down_rounded,
+                            color: AppColors.muted,
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),
-                ),
-
-                // ── Time + expand arrow ───────────────────────────────
-                Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        timeText,
-                        style: t.bodyMedium?.copyWith(color: AppColors.muted),
-                      ),
-                      if (hasDetails) ...[
-                        const SizedBox(height: 8),
-                        Icon(
-                          expanded
-                              ? Icons.keyboard_arrow_up_rounded
-                              : Icons.keyboard_arrow_down_rounded,
-                          color: AppColors.muted,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
 
-            // ── Expandable details ──────────────────────────────────────
+            // ── Expandable details ──────────────────────────────────
             AnimatedCrossFade(
               crossFadeState: expanded
                   ? CrossFadeState.showSecond
@@ -994,7 +934,7 @@ class _EmptyActivityState extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Row building (date-grouped, like the original)
+// Row building (date-grouped)
 // ═══════════════════════════════════════════════════════════════════════════
 
 enum _RowKind { groupHeader, entry }
@@ -1156,7 +1096,6 @@ String _weekdayName(DateTime d) {
   return w[d.weekday - 1];
 }
 
-/// Color for the left strip based on entry kind.
 Color _stripColor(ActivityEntry entry) {
   const blue = Color(0xFF2F6FED);
   const red = Color(0xFFE53935);
@@ -1168,11 +1107,10 @@ Color _stripColor(ActivityEntry entry) {
   if (entry.kind == 'resolved_lost') return red;
   if (entry.kind == 'resolved_damaged') return orange;
   if (entry.isBucketEvent) return purple;
-  if (entry.isUserEvent) return const Color(0xFF00897B); // teal
+  if (entry.isUserEvent) return const Color(0xFF00897B);
   return AppColors.muted;
 }
 
-/// Icon for the action badge.
 IconData _actionIcon(ActivityEntry entry) {
   switch (entry.kind) {
     case 'checkout':
@@ -1197,7 +1135,6 @@ IconData _actionIcon(ActivityEntry entry) {
   }
 }
 
-/// Icon for the avatar (non-transaction entries).
 IconData _entityIcon(ActivityEntry entry) {
   if (entry.isBucketEvent) return Icons.category_rounded;
   if (entry.isUserEvent) return Icons.person_rounded;

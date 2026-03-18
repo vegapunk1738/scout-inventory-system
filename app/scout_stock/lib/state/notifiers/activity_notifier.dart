@@ -4,115 +4,46 @@ import 'package:scout_stock/data/api/api_client.dart';
 import 'package:scout_stock/domain/models/activity.dart';
 import 'package:scout_stock/state/providers/api_provider.dart';
 
-// ─── Filter types ───────────────────────────────────────────────────────────
+// ─── Unified filter ─────────────────────────────────────────────────────────
 
-enum ActivityEntityFilter { all, item, bucket, user }
-
-enum ActivityActionFilter {
+enum ActivityFilter {
   all,
-  checkout,
-  returned, // 'return' is a keyword
+  checkouts,
+  returns,
   resolved,
-  created,
-  updated,
-  deleted,
+  admin,
 }
 
-extension ActivityEntityFilterX on ActivityEntityFilter {
-  String get queryValue {
-    switch (this) {
-      case ActivityEntityFilter.all:
-        return 'all';
-      case ActivityEntityFilter.item:
-        return 'item';
-      case ActivityEntityFilter.bucket:
-        return 'bucket';
-      case ActivityEntityFilter.user:
-        return 'user';
-    }
-  }
-
+extension ActivityFilterX on ActivityFilter {
   String get label {
     switch (this) {
-      case ActivityEntityFilter.all:
+      case ActivityFilter.all:
         return 'All';
-      case ActivityEntityFilter.item:
-        return 'Items';
-      case ActivityEntityFilter.bucket:
-        return 'Buckets';
-      case ActivityEntityFilter.user:
-        return 'Users';
-    }
-  }
-}
-
-extension ActivityActionFilterX on ActivityActionFilter {
-  String get queryValue {
-    switch (this) {
-      case ActivityActionFilter.all:
-        return 'all';
-      case ActivityActionFilter.checkout:
-        return 'checkout';
-      case ActivityActionFilter.returned:
-        return 'return';
-      case ActivityActionFilter.resolved:
-        return 'resolved';
-      case ActivityActionFilter.created:
-        return 'created';
-      case ActivityActionFilter.updated:
-        return 'updated';
-      case ActivityActionFilter.deleted:
-        return 'deleted';
-    }
-  }
-
-  String get label {
-    switch (this) {
-      case ActivityActionFilter.all:
-        return 'All';
-      case ActivityActionFilter.checkout:
-        return 'Checkout';
-      case ActivityActionFilter.returned:
-        return 'Return';
-      case ActivityActionFilter.resolved:
+      case ActivityFilter.checkouts:
+        return 'Checkouts';
+      case ActivityFilter.returns:
+        return 'Returns';
+      case ActivityFilter.resolved:
         return 'Resolved';
-      case ActivityActionFilter.created:
-        return 'Created';
-      case ActivityActionFilter.updated:
-        return 'Updated';
-      case ActivityActionFilter.deleted:
-        return 'Deleted';
+      case ActivityFilter.admin:
+        return 'Admin';
     }
   }
-}
 
-// ─── Derived action filters per entity ──────────────────────────────────────
-
-List<ActivityActionFilter> actionsForEntity(ActivityEntityFilter entity) {
-  switch (entity) {
-    case ActivityEntityFilter.all:
-      return ActivityActionFilter.values;
-    case ActivityEntityFilter.item:
-      return [
-        ActivityActionFilter.all,
-        ActivityActionFilter.checkout,
-        ActivityActionFilter.returned,
-        ActivityActionFilter.resolved,
-      ];
-    case ActivityEntityFilter.bucket:
-      return [
-        ActivityActionFilter.all,
-        ActivityActionFilter.created,
-        ActivityActionFilter.updated,
-        ActivityActionFilter.deleted,
-      ];
-    case ActivityEntityFilter.user:
-      return [
-        ActivityActionFilter.all,
-        ActivityActionFilter.created,
-        ActivityActionFilter.updated,
-        ActivityActionFilter.deleted,
-      ];
+  /// Maps this filter to backend query params: { entity, action }.
+  Map<String, String> get queryParams {
+    switch (this) {
+      case ActivityFilter.all:
+        return {'entity': 'all', 'action': 'all'};
+      case ActivityFilter.checkouts:
+        return {'entity': 'item', 'action': 'checkout'};
+      case ActivityFilter.returns:
+        return {'entity': 'item', 'action': 'return'};
+      case ActivityFilter.resolved:
+        return {'entity': 'item', 'action': 'resolved'};
+      case ActivityFilter.admin:
+        return {'entity': 'admin', 'action': 'all'};
+    }
   }
 }
 
@@ -125,8 +56,7 @@ class ActivityState {
     this.loadingMore = false,
     this.hasMore = true,
     this.total = 0,
-    this.entityFilter = ActivityEntityFilter.all,
-    this.actionFilter = ActivityActionFilter.all,
+    this.filter = ActivityFilter.all,
     this.searchQuery = '',
     this.error,
     this.newEntryIds = const {},
@@ -138,8 +68,7 @@ class ActivityState {
   final bool loadingMore;
   final bool hasMore;
   final int total;
-  final ActivityEntityFilter entityFilter;
-  final ActivityActionFilter actionFilter;
+  final ActivityFilter filter;
   final String searchQuery;
   final String? error;
 
@@ -155,8 +84,7 @@ class ActivityState {
     bool? loadingMore,
     bool? hasMore,
     int? total,
-    ActivityEntityFilter? entityFilter,
-    ActivityActionFilter? actionFilter,
+    ActivityFilter? filter,
     String? searchQuery,
     String? error,
     Set<String>? newEntryIds,
@@ -168,8 +96,7 @@ class ActivityState {
       loadingMore: loadingMore ?? this.loadingMore,
       hasMore: hasMore ?? this.hasMore,
       total: total ?? this.total,
-      entityFilter: entityFilter ?? this.entityFilter,
-      actionFilter: actionFilter ?? this.actionFilter,
+      filter: filter ?? this.filter,
       searchQuery: searchQuery ?? this.searchQuery,
       error: error,
       newEntryIds: newEntryIds ?? this.newEntryIds,
@@ -201,10 +128,7 @@ class ActivityNotifier extends Notifier<ActivityState> {
       _searchDebounce?.cancel();
     });
 
-    // IMPORTANT: Schedule the initial fetch AFTER build() returns the
-    // initial state. Calling _fetchInitial() synchronously here would
-    // try to read/write `state` before it's been set, causing
-    // "Tried to read the state of an uninitialized provider".
+    // Schedule the initial fetch AFTER build() returns the initial state.
     Future.microtask(() => _fetchInitial());
 
     return const ActivityState(loading: true);
@@ -212,24 +136,9 @@ class ActivityNotifier extends Notifier<ActivityState> {
 
   // ── Public API ──────────────────────────────────────────────────────────
 
-  void setEntityFilter(ActivityEntityFilter filter) {
-    if (filter == state.entityFilter) return;
-
-    final validActions = actionsForEntity(filter);
-    final newAction = validActions.contains(state.actionFilter)
-        ? state.actionFilter
-        : ActivityActionFilter.all;
-
-    state = state.copyWith(
-      entityFilter: filter,
-      actionFilter: newAction,
-    );
-    _fetchInitial();
-  }
-
-  void setActionFilter(ActivityActionFilter filter) {
-    if (filter == state.actionFilter) return;
-    state = state.copyWith(actionFilter: filter);
+  void setFilter(ActivityFilter filter) {
+    if (filter == state.filter) return;
+    state = state.copyWith(filter: filter);
     _fetchInitial();
   }
 
@@ -302,11 +211,12 @@ class ActivityNotifier extends Notifier<ActivityState> {
   }
 
   Future<_ActivityPage> _fetchPage({required int offset}) async {
+    final filterParams = state.filter.queryParams;
+
     final params = <String, String>{
       'limit': '$_pageSize',
       'offset': '$offset',
-      'entity': state.entityFilter.queryValue,
-      'action': state.actionFilter.queryValue,
+      ...filterParams,
     };
     if (state.searchQuery.isNotEmpty) {
       params['q'] = state.searchQuery;
@@ -346,12 +256,13 @@ class ActivityNotifier extends Notifier<ActivityState> {
 
       if (newCount == 0) return;
 
+      final filterParams = state.filter.queryParams;
+
       final params = <String, String>{
         'limit': '$newCount',
         'offset': '0',
         'since': since,
-        'entity': state.entityFilter.queryValue,
-        'action': state.actionFilter.queryValue,
+        ...filterParams,
       };
       if (state.searchQuery.isNotEmpty) {
         params['q'] = state.searchQuery;

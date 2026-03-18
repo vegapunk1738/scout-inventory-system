@@ -38,7 +38,8 @@ activityRoutes.use("/*", auth(), requireRole("admin"));
  *   limit   — page size (default 20, max 100)
  *   offset  — pagination offset (default 0)
  *   since   — ISO timestamp; only return entries created after this
- *   entity  — filter: 'item' | 'bucket' | 'user' | 'all' (default 'all')
+ *   entity  — filter: 'item' | 'bucket' | 'user' | 'admin' | 'all' (default 'all')
+ *             'admin' = bucket + user combined
  *   action  — filter: 'checkout' | 'return' | 'resolved' | 'created' |
  *             'updated' | 'deleted' | 'all' (default 'all')
  *   q       — search query (matches actor name, summary)
@@ -84,6 +85,9 @@ activityRoutes.get("/", async (c) => {
     whereClauses.push("a.entity = 'bucket'");
   } else if (entityFilter === "user") {
     whereClauses.push("a.entity = 'user'");
+  } else if (entityFilter === "admin") {
+    // Combined bucket + user (all non-transaction activity)
+    whereClauses.push("a.entity IN ('bucket', 'user')");
   }
 
   // ── action filter
@@ -103,8 +107,8 @@ activityRoutes.get("/", async (c) => {
 
   // ── search filter
   if (searchQuery) {
-    whereClauses.push("(LOWER(a.actor_name) LIKE ? OR LOWER(a.summary) LIKE ?)");
-    params.push(`%${searchQuery}%`, `%${searchQuery}%`);
+    whereClauses.push("(LOWER(a.actor_name) LIKE ? OR LOWER(a.summary) LIKE ? OR a.actor_scout_id LIKE ?)");
+    params.push(`%${searchQuery}%`, `%${searchQuery}%`, `%${searchQuery}%`);
   }
 
   const whereSQL = whereClauses.length > 0
@@ -122,6 +126,11 @@ activityRoutes.get("/", async (c) => {
   const unionSQL = `
     SELECT * FROM (
       -- ── Transactions ──────────────────────────────────────────────
+      --
+      -- actor  = performed_by (who clicked the button) — falls back to user_id
+      -- target = user_id      (whose inventory changed)
+      --
+      -- When they differ, it means an admin acted on behalf of a scout.
       SELECT
         t.id                                                  AS id,
         CASE
@@ -136,19 +145,29 @@ activityRoutes.get("/", async (c) => {
           )
           ELSE 'return'
         END                                                   AS kind,
-        t.user_id                                             AS actor_id,
-        COALESCE(u.full_name, 'Unknown')                      AS actor_name,
+        COALESCE(t.performed_by, t.user_id)                   AS actor_id,
+        COALESCE(performer.full_name, u.full_name, 'Unknown') AS actor_name,
+        COALESCE(performer.scout_id, u.scout_id, '')          AS actor_scout_id,
         'item'                                                AS entity,
         CASE
           WHEN t.type = 'checkout' THEN
-            u.full_name || ' checked out ' ||
+            COALESCE(performer.full_name, u.full_name) || ' checked out ' ||
             (SELECT COUNT(*) FROM transaction_items ti WHERE ti.transaction_id = t.id) ||
             ' item(s)'
           ELSE
-            u.full_name || ' returned ' ||
+            COALESCE(performer.full_name, u.full_name) || ' returned ' ||
             (SELECT COUNT(*) FROM transaction_items ti WHERE ti.transaction_id = t.id) ||
             ' item(s)'
         END                                                   AS summary,
+        -- Target user info (only meaningful when performed_by != user_id)
+        CASE WHEN t.performed_by IS NOT NULL AND t.performed_by != t.user_id
+          THEN COALESCE(u.full_name, 'Unknown')
+          ELSE ''
+        END                                                   AS target_user_name,
+        CASE WHEN t.performed_by IS NOT NULL AND t.performed_by != t.user_id
+          THEN COALESCE(u.scout_id, '')
+          ELSE ''
+        END                                                   AS target_user_scout_id,
         (
           SELECT json_group_array(
             json_object(
@@ -168,6 +187,7 @@ activityRoutes.get("/", async (c) => {
         t.created_at                                          AS created_at
       FROM transactions t
       LEFT JOIN users u ON t.user_id = u.id
+      LEFT JOIN users performer ON t.performed_by = performer.id
 
       UNION ALL
 
@@ -177,8 +197,11 @@ activityRoutes.get("/", async (c) => {
         al.entity || '_' || al.action                         AS kind,
         al.actor_id                                           AS actor_id,
         COALESCE(u2.full_name, 'Unknown')                     AS actor_name,
+        COALESCE(u2.scout_id, '')                             AS actor_scout_id,
         al.entity                                             AS entity,
         al.summary                                            AS summary,
+        ''                                                    AS target_user_name,
+        ''                                                    AS target_user_scout_id,
         al.meta                                               AS meta,
         al.created_at                                         AS created_at
       FROM audit_logs al
@@ -205,8 +228,11 @@ activityRoutes.get("/", async (c) => {
     kind: row.kind,
     actor_id: row.actor_id,
     actor_name: row.actor_name,
+    actor_scout_id: row.actor_scout_id ?? '',
     entity: row.entity,
     summary: row.summary,
+    target_user_name: row.target_user_name ?? '',
+    target_user_scout_id: row.target_user_scout_id ?? '',
     meta: row.meta ? tryParseJSON(row.meta) : null,
     created_at: row.created_at,
   }));

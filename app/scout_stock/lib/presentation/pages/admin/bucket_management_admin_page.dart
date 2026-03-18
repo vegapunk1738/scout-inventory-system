@@ -544,7 +544,9 @@ class _BucketManagementAdminPageState
                           if (b.barcode.toLowerCase().contains(q)) return true;
                           if (b.items.any(
                             (i) => i.name.toLowerCase().contains(q),
-                          )) return true;
+                          )) {
+                            return true;
+                          }
                           return false;
                         })
                         .toList(growable: false);

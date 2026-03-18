@@ -31,6 +31,7 @@ export const transactions = sqliteTable("transactions", {
   id: text("id").primaryKey(),
   type: text("type", { enum: ["checkout", "return"] }).notNull(),
   user_id: text("user_id").notNull(),
+  performed_by: text("performed_by"),        
   created_at: text("created_at").notNull(),
   idempotency_key: text("idempotency_key").unique().notNull(),
 });
