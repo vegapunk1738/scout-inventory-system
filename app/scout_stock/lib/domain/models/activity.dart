@@ -2,7 +2,7 @@
 ///
 /// The backend merges two sources into one feed:
 /// - `audit_logs` rows → action like "bucket_created", "user_updated", etc.
-/// - `transactions` rows → action is "checkout" or "return"
+/// - `transactions` rows → action is "checkout", "return", or "resolve"
 ///
 /// Both share the same shape: id, action, actor_name, summary, meta, created_at.
 class ActivityEntry {
@@ -20,13 +20,13 @@ class ActivityEntry {
   final String id;
 
   /// e.g. "bucket_created", "bucket_updated", "user_created",
-  ///      "checkout", "return", "bucket_deleted", etc.
+  ///      "checkout", "return", "resolve", "bucket_deleted", etc.
   final String action;
 
   final String actorId;
   final String actorName;
 
-  /// Human-readable one-liner, e.g. "created Tent Pegs (SSB-TNT-912)"
+  /// Human-readable one-liner from the backend
   final String summary;
 
   /// Structured detail for the expandable area. Shape varies by action.
@@ -34,7 +34,7 @@ class ActivityEntry {
 
   final DateTime createdAt;
 
-  /// "audit" or "transaction" — where the row came from
+  /// "audit" or "transaction"
   final String source;
 
   factory ActivityEntry.fromJson(Map<String, dynamic> json) {
@@ -63,8 +63,7 @@ class ActivityEntry {
   }
 
   /// Changes list for bucket_updated / user_updated.
-  /// Handles both legacy format (plain strings) and new structured format
-  /// ({kind, description} maps) for backward compatibility with old audit rows.
+  /// Handles both legacy format (plain strings) and new structured format.
   List<ActivityChangeDetail> get changes {
     final raw = meta['changes'] as List?;
     if (raw == null) return const [];
@@ -72,7 +71,6 @@ class ActivityEntry {
       if (e is Map<String, dynamic>) {
         return ActivityChangeDetail.fromJson(e);
       }
-      // Legacy: plain string like "items updated" or "name: \"X\" → \"Y\""
       return ActivityChangeDetail(
         kind: 'unknown',
         description: e.toString(),
@@ -85,6 +83,7 @@ class ActivityEntry {
     switch (action) {
       case 'checkout':
       case 'return':
+      case 'resolve':
         return items.isNotEmpty;
       case 'bucket_created':
         return items.isNotEmpty;
@@ -97,7 +96,7 @@ class ActivityEntry {
   }
 }
 
-/// Item detail within a checkout/return/bucket_created event.
+/// Item detail within a checkout/return/bucket_created/resolve event.
 class ActivityItemDetail {
   const ActivityItemDetail({
     required this.quantity,
@@ -105,6 +104,7 @@ class ActivityItemDetail {
     this.itemEmoji,
     this.bucketName,
     this.bucketBarcode,
+    this.status,
   });
 
   final int quantity;
@@ -113,6 +113,9 @@ class ActivityItemDetail {
   final String? bucketName;
   final String? bucketBarcode;
 
+  /// For resolve items: "normal" (returned), "lost", "damaged"
+  final String? status;
+
   factory ActivityItemDetail.fromJson(Map<String, dynamic> json) {
     return ActivityItemDetail(
       quantity: (json['quantity'] as num?)?.toInt() ?? 0,
@@ -120,7 +123,22 @@ class ActivityItemDetail {
       itemEmoji: json['item_emoji'] as String? ?? json['emoji'] as String?,
       bucketName: json['bucket_name'] as String?,
       bucketBarcode: json['bucket_barcode'] as String?,
+      status: json['status'] as String?,
     );
+  }
+
+  /// Human-readable resolve action label
+  String get resolveActionLabel {
+    switch (status) {
+      case 'normal':
+        return 'returned';
+      case 'lost':
+        return 'marked lost';
+      case 'damaged':
+        return 'marked damaged';
+      default:
+        return 'resolved';
+    }
   }
 }
 
@@ -131,8 +149,6 @@ class ActivityChangeDetail {
     required this.description,
   });
 
-  /// "renamed", "item_added", "item_removed", "item_increased",
-  /// "item_decreased", "role_changed", "name_changed", "password_reset"
   final String kind;
   final String description;
 

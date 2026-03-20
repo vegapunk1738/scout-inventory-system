@@ -4,11 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:scout_stock/domain/models/activity.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
+import 'package:scout_stock/state/notifiers/activity_notifier.dart';
 import 'package:scout_stock/state/providers/activity_provider.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Activity Log Page — wired to real API via activityProvider
+// Activity Log Page
 // ═══════════════════════════════════════════════════════════════════════════
 
 class ActivityLogPage extends ConsumerStatefulWidget {
@@ -46,6 +47,13 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
   ValueNotifier<bool> _exp(String id) =>
       _expanded.putIfAbsent(id, () => ValueNotifier<bool>(false));
 
+  void _clearExpandState() {
+    for (final n in _expanded.values) {
+      n.dispose();
+    }
+    _expanded.clear();
+  }
+
   void _onScroll() {
     if (!_scrollCtrl.hasClients) return;
     const threshold = 220.0;
@@ -58,12 +66,15 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
     _searchDebounce?.cancel();
     _searchDebounce = Timer(const Duration(milliseconds: 300), () {
       ref.read(activityProvider.notifier).search(v.trim());
-      for (final n in _expanded.values) {
-        n.dispose();
-      }
-      _expanded.clear();
+      _clearExpandState();
     });
     setState(() {});
+  }
+
+  void _onFilterChanged(ActivityFilter filter) {
+    ref.read(activityProvider.notifier).setFilter(filter);
+    _clearExpandState();
+    if (_scrollCtrl.hasClients) _scrollCtrl.jumpTo(0);
   }
 
   @override
@@ -106,22 +117,38 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
                 ),
                 const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
+                // ── Search + Filter Chips (sticky) ──
                 SliverPersistentHeader(
                   pinned: true,
                   delegate: _StickyHeaderDelegate(
-                    height: 72,
+                    height: 72 + 52, // search + chips
                     child: Container(
                       color: AppColors.background,
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                      child: _SearchCard(
-                        controller: _searchCtrl,
-                        onChanged: _onSearchChanged,
-                        hintText: 'Search user, item, or bucket…',
+                      child: Column(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                            child: _SearchCard(
+                              controller: _searchCtrl,
+                              onChanged: _onSearchChanged,
+                              hintText: 'Search user, item, or bucket…',
+                            ),
+                          ),
+                          SizedBox(
+                            height: 44,
+                            child: _FilterChips(
+                              selected: activity.filter,
+                              onChanged: _onFilterChanged,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
                       ),
                     ),
                   ),
                 ),
 
+                // ── Content ──
                 if (activity.loading)
                   const SliverFillRemaining(
                     hasScrollBody: false,
@@ -157,6 +184,7 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
                     hasScrollBody: false,
                     child: _EmptyActivityState(
                       query: activity.query,
+                      filter: activity.filter,
                       emojiBase: emojiBase,
                       titleStyle: t.titleLarge,
                       bodyStyle: t.bodyLarge?.copyWith(color: AppColors.muted),
@@ -176,7 +204,6 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
                               topGap: row.topGap,
                             );
                           }
-
                           final entry = row.entry!;
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 12),
@@ -229,13 +256,88 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
                     ),
                   ),
                 ),
-
                 SliverToBoxAdapter(child: SizedBox(height: bottomFootprint)),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Filter Chips
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _FilterChips extends StatelessWidget {
+  const _FilterChips({required this.selected, required this.onChanged});
+  final ActivityFilter selected;
+  final ValueChanged<ActivityFilter> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final tokens = Theme.of(context).extension<AppTokens>()!;
+
+    return ListView.separated(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: ActivityFilter.values.length,
+      separatorBuilder: (_, __) => const SizedBox(width: 8),
+      itemBuilder: (context, index) {
+        final filter = ActivityFilter.values[index];
+        final isSelected = filter == selected;
+
+        final IconData icon;
+        switch (filter) {
+          case ActivityFilter.all:
+            icon = Icons.grid_view_rounded;
+          case ActivityFilter.items:
+            icon = Icons.swap_vert_rounded;
+          case ActivityFilter.resolves:
+            icon = Icons.gavel_rounded;
+          case ActivityFilter.buckets:
+            icon = Icons.inventory_2_rounded;
+          case ActivityFilter.users:
+            icon = Icons.group_rounded;
+        }
+
+        return GestureDetector(
+          onTap: () => onChanged(filter),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: isSelected ? AppColors.primary : Colors.white,
+              borderRadius: BorderRadius.circular(tokens.radiusLg),
+              border: Border.all(
+                color: isSelected
+                    ? AppColors.primary
+                    : AppColors.outline,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 16,
+                  color: isSelected ? Colors.white : AppColors.muted,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  filter.label,
+                  style: t.labelMedium?.copyWith(
+                    color: isSelected ? Colors.white : AppColors.ink,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -298,13 +400,9 @@ class _ActivityHeader extends StatelessWidget {
             children: [
               Text('Activity Log', style: t.titleLarge),
               const SizedBox(height: 4),
-              Text(
-                'ADMIN VIEW',
-                style: t.labelMedium?.copyWith(
-                  color: AppColors.primary,
-                  letterSpacing: 1.8,
-                ),
-              ),
+              Text('ADMIN VIEW',
+                  style: t.labelMedium?.copyWith(
+                      color: AppColors.primary, letterSpacing: 1.8)),
             ],
           ),
         ),
@@ -333,11 +431,10 @@ class _ActivityHeader extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _SearchCard extends StatelessWidget {
-  const _SearchCard({
-    required this.controller,
-    required this.onChanged,
-    required this.hintText,
-  });
+  const _SearchCard(
+      {required this.controller,
+      required this.onChanged,
+      required this.hintText});
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
   final String hintText;
@@ -349,10 +446,9 @@ class _SearchCard extends StatelessWidget {
 
     return Theme(
       data: Theme.of(context).copyWith(
-        hoverColor: Colors.transparent,
-        splashColor: Colors.transparent,
-        highlightColor: Colors.transparent,
-      ),
+          hoverColor: Colors.transparent,
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent),
       child: Container(
         height: 56,
         decoration: BoxDecoration(
@@ -371,9 +467,7 @@ class _SearchCard extends StatelessWidget {
                 onChanged: onChanged,
                 textInputAction: TextInputAction.search,
                 style: t.bodyLarge?.copyWith(
-                  color: AppColors.ink,
-                  fontWeight: FontWeight.w600,
-                ),
+                    color: AppColors.ink, fontWeight: FontWeight.w600),
                 decoration: InputDecoration(
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
@@ -382,9 +476,8 @@ class _SearchCard extends StatelessWidget {
                   contentPadding: const EdgeInsets.only(right: 16),
                   hintText: hintText,
                   hintStyle: t.bodyLarge?.copyWith(
-                    color: const Color(0xFFB9C0C8),
-                    fontWeight: FontWeight.w700,
-                  ),
+                      color: const Color(0xFFB9C0C8),
+                      fontWeight: FontWeight.w700),
                 ),
               ),
             ),
@@ -398,10 +491,9 @@ class _SearchCard extends StatelessWidget {
                 splashRadius: 20,
                 tooltip: 'Clear',
                 style: IconButton.styleFrom(
-                  splashFactory: NoSplash.splashFactory,
-                  hoverColor: Colors.transparent,
-                  highlightColor: Colors.transparent,
-                ),
+                    splashFactory: NoSplash.splashFactory,
+                    hoverColor: Colors.transparent,
+                    highlightColor: Colors.transparent),
               ),
             const SizedBox(width: 6),
           ],
@@ -424,11 +516,8 @@ class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   double get minExtent => height;
   @override
   double get maxExtent => height;
-
   @override
-  Widget build(BuildContext c, double shrinkOffset, bool overlapsContent) =>
-      child;
-
+  Widget build(BuildContext c, double s, bool o) => child;
   @override
   bool shouldRebuild(covariant _StickyHeaderDelegate old) =>
       old.height != height || old.child != child;
@@ -441,21 +530,35 @@ class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
 class _EmptyActivityState extends StatelessWidget {
   const _EmptyActivityState({
     required this.query,
+    required this.filter,
     required this.emojiBase,
     required this.titleStyle,
     required this.bodyStyle,
   });
   final String query;
+  final ActivityFilter filter;
   final TextStyle emojiBase;
   final TextStyle? titleStyle;
   final TextStyle? bodyStyle;
 
   @override
   Widget build(BuildContext context) {
-    final title = query.isEmpty ? "No activity yet" : "No results";
-    final subtitle = query.isEmpty
-        ? "When scouts check out or return items,\nyou'll see it here"
-        : "Try a different keyword";
+    final hasSearch = query.isNotEmpty;
+    final hasFilter = filter != ActivityFilter.all;
+
+    final String title;
+    final String subtitle;
+
+    if (hasSearch) {
+      title = "No results";
+      subtitle = "Try a different keyword";
+    } else if (hasFilter) {
+      title = "No ${filter.label.toLowerCase()} activity";
+      subtitle = "Nothing matches this filter yet";
+    } else {
+      title = "No activity yet";
+      subtitle = "When scouts check out or return items,\nyou'll see it here";
+    }
 
     return Center(
       child: Padding(
@@ -496,11 +599,11 @@ class _ActivityRow {
     this.topGap = 0,
   });
 
-  const _ActivityRow.header({
-    required String titleLeft,
-    required String titleRight,
-    double topGap = 0,
-  }) : this._(
+  const _ActivityRow.header(
+      {required String titleLeft,
+      required String titleRight,
+      double topGap = 0})
+      : this._(
             kind: _RowKind.groupHeader,
             titleLeft: titleLeft,
             titleRight: titleRight,
@@ -535,10 +638,9 @@ List<_ActivityRow> _buildRows(List<ActivityEntry> entries) {
   for (int i = 0; i < keys.length; i++) {
     final day = keys[i];
     rows.add(_ActivityRow.header(
-      titleLeft: leftTitle(day),
-      titleRight: _prettyDate(day),
-      topGap: i == 0 ? 0 : 16,
-    ));
+        titleLeft: leftTitle(day),
+        titleRight: _prettyDate(day),
+        topGap: i == 0 ? 0 : 16));
     final items = map[day]!..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     for (final e in items) {
       rows.add(_ActivityRow.entry(e));
@@ -548,15 +650,14 @@ List<_ActivityRow> _buildRows(List<ActivityEntry> entries) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Group Header Row
+// Group Header
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _GroupHeaderRow extends StatelessWidget {
-  const _GroupHeaderRow({
-    required this.titleLeft,
-    required this.titleRight,
-    required this.topGap,
-  });
+  const _GroupHeaderRow(
+      {required this.titleLeft,
+      required this.titleRight,
+      required this.topGap});
   final String titleLeft;
   final String titleRight;
   final double topGap;
@@ -568,21 +669,19 @@ class _GroupHeaderRow extends StatelessWidget {
 
     return Padding(
       padding: EdgeInsets.only(top: topGap, bottom: 12),
-      child: Column(
-        children: [
-          Row(children: [
-            Text(titleLeft,
-                style: t.labelMedium?.copyWith(
-                    color: isToday ? AppColors.primary : AppColors.muted)),
-            const Spacer(),
-            Text(titleRight,
-                style: t.titleMedium?.copyWith(color: AppColors.muted)),
-          ]),
-          const SizedBox(height: 10),
-          const Divider(height: 1),
-          const SizedBox(height: 12),
-        ],
-      ),
+      child: Column(children: [
+        Row(children: [
+          Text(titleLeft,
+              style: t.labelMedium?.copyWith(
+                  color: isToday ? AppColors.primary : AppColors.muted)),
+          const Spacer(),
+          Text(titleRight,
+              style: t.titleMedium?.copyWith(color: AppColors.muted)),
+        ]),
+        const SizedBox(height: 10),
+        const Divider(height: 1),
+        const SizedBox(height: 12),
+      ]),
     );
   }
 }
@@ -592,11 +691,8 @@ class _GroupHeaderRow extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _ExpandableActivityCard extends StatelessWidget {
-  const _ExpandableActivityCard({
-    required this.entry,
-    required this.expanded,
-    required this.radiusXl,
-  });
+  const _ExpandableActivityCard(
+      {required this.entry, required this.expanded, required this.radiusXl});
 
   final ActivityEntry entry;
   final ValueNotifier<bool> expanded;
@@ -613,10 +709,7 @@ class _ExpandableActivityCard extends StatelessWidget {
     final canExpand = entry.hasExpandableContent;
 
     final userNameStyle = t.titleMedium?.copyWith(
-      fontSize: 17,
-      fontWeight: FontWeight.w800,
-      color: AppColors.ink,
-    );
+        fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink);
 
     return ValueListenableBuilder<bool>(
       valueListenable: expanded,
@@ -642,17 +735,13 @@ class _ExpandableActivityCard extends StatelessWidget {
                     Stack(
                       clipBehavior: Clip.none,
                       children: [
-                        // ✅ Always initials from actor name
                         CircleAvatar(
                           radius: 22,
                           backgroundColor: AppColors.background,
-                          child: Text(
-                            initials,
-                            style: t.titleMedium
-                                ?.copyWith(fontWeight: FontWeight.w800),
-                          ),
+                          child: Text(initials,
+                              style: t.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w800)),
                         ),
-                        // ✅ Badge snug at bottom-right of avatar
                         Positioned(
                           right: -4,
                           bottom: -3,
@@ -682,14 +771,11 @@ class _ExpandableActivityCard extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                                 style: userNameStyle),
                             const SizedBox(height: 4),
-                            // ✅ summary comes from backend
-                            Text(
-                              entry.summary,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style:
-                                  t.bodyMedium?.copyWith(color: AppColors.ink),
-                            ),
+                            Text(entry.summary,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: t.bodyMedium
+                                    ?.copyWith(color: AppColors.ink)),
                           ],
                         ),
                       ),
@@ -705,11 +791,10 @@ class _ExpandableActivityCard extends StatelessWidget {
                           const SizedBox(height: 8),
                           if (canExpand)
                             Icon(
-                              isOpen
-                                  ? Icons.keyboard_arrow_up_rounded
-                                  : Icons.keyboard_arrow_down_rounded,
-                              color: AppColors.muted,
-                            )
+                                isOpen
+                                    ? Icons.keyboard_arrow_up_rounded
+                                    : Icons.keyboard_arrow_down_rounded,
+                                color: AppColors.muted)
                           else
                             const SizedBox(height: 24),
                         ],
@@ -745,6 +830,8 @@ Color _stripColorFor(String action) {
       return const Color(0xFF2F6FED);
     case 'return':
       return AppColors.primary;
+    case 'resolve':
+      return const Color(0xFF7C3AED);
     case 'bucket_created':
     case 'user_created':
       return AppColors.primary;
@@ -755,8 +842,6 @@ Color _stripColorFor(String action) {
     case 'bucket_deleted':
     case 'user_deleted':
       return const Color(0xFFD92D20);
-    case 'item_resolved':
-      return const Color(0xFF7C3AED);
     default:
       return AppColors.muted;
   }
@@ -768,6 +853,8 @@ IconData _badgeIconFor(String action) {
       return Icons.arrow_downward_rounded;
     case 'return':
       return Icons.arrow_upward_rounded;
+    case 'resolve':
+      return Icons.gavel_rounded;
     case 'bucket_created':
       return Icons.add_rounded;
     case 'bucket_updated':
@@ -780,15 +867,13 @@ IconData _badgeIconFor(String action) {
       return Icons.edit_rounded;
     case 'user_deleted':
       return Icons.person_remove_rounded;
-    case 'item_resolved':
-      return Icons.gavel_rounded;
     default:
       return Icons.info_rounded;
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Expanded Content Builder
+// Expanded Content Router
 // ═══════════════════════════════════════════════════════════════════════════
 
 Widget _buildExpandedContent(ActivityEntry entry) {
@@ -796,6 +881,8 @@ Widget _buildExpandedContent(ActivityEntry entry) {
     case 'checkout':
     case 'return':
       return _CheckoutReturnDetails(items: entry.items);
+    case 'resolve':
+      return _ResolveDetails(items: entry.items);
     case 'bucket_created':
       return _BucketCreatedDetails(items: entry.items);
     case 'bucket_updated':
@@ -847,10 +934,9 @@ class _CheckoutReturnDetails extends StatelessWidget {
                   textBaseline: TextBaseline.alphabetic,
                   children: [
                     SizedBox(
-                      width: 34,
-                      child: Text("${items[i].quantity}×",
-                          textAlign: TextAlign.right, style: qtyStyle),
-                    ),
+                        width: 34,
+                        child: Text("${items[i].quantity}×",
+                            textAlign: TextAlign.right, style: qtyStyle)),
                     const SizedBox(width: 12),
                     Expanded(
                         child: Text(items[i].itemName,
@@ -868,6 +954,96 @@ class _CheckoutReturnDetails extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Resolve detail lines
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _ResolveDetails extends StatelessWidget {
+  const _ResolveDetails({required this.items});
+  final List<ActivityItemDetail> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final actionStyle = t.bodyMedium?.copyWith(
+        fontSize: 14,
+        fontWeight: FontWeight.w700,
+        height: 1.35);
+    final detailStyle = t.bodyMedium?.copyWith(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        color: AppColors.ink,
+        height: 1.35);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+      decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: AppColors.outline))),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (int i = 0; i < items.length; i++) ...[
+            if (i != 0) const SizedBox(height: 6),
+            _buildResolveLine(items[i], actionStyle, detailStyle),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResolveLine(
+    ActivityItemDetail item,
+    TextStyle? actionStyle,
+    TextStyle? detailStyle,
+  ) {
+    final label = item.resolveActionLabel;
+    final isReturned = item.status == 'normal';
+
+    // Color the action label
+    final Color actionColor;
+    final IconData actionIcon;
+    switch (item.status) {
+      case 'lost':
+        actionColor = const Color(0xFFD92D20);
+        actionIcon = Icons.cancel_rounded;
+      case 'damaged':
+        actionColor = const Color(0xFFFF9800);
+        actionIcon = Icons.warning_rounded;
+      default: // normal = returned
+        actionColor = AppColors.primary;
+        actionIcon = Icons.check_circle_rounded;
+    }
+
+    // Build: "returned ×3 of Rope to Tent Pegs" or "marked lost ×2 of Rope"
+    final suffix = isReturned && item.bucketName != null
+        ? ' to ${item.bucketName}'
+        : '';
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(actionIcon, size: 16, color: actionColor),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text.rich(
+            TextSpan(children: [
+              TextSpan(
+                text: '$label ',
+                style: actionStyle?.copyWith(color: actionColor),
+              ),
+              TextSpan(
+                text: '×${item.quantity} of ${item.itemName}$suffix',
+                style: detailStyle,
+              ),
+            ]),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -909,9 +1085,8 @@ class _BucketCreatedDetails extends StatelessWidget {
               children: [
                 Text("added ", style: labelStyle),
                 Expanded(
-                  child: Text("${items[i].quantity}× ${items[i].itemName}",
-                      style: changeStyle),
-                ),
+                    child: Text("${items[i].quantity}× ${items[i].itemName}",
+                        style: changeStyle)),
               ],
             ),
           ],
@@ -966,7 +1141,6 @@ class _ChangeListDetails extends StatelessWidget {
   Widget _changeIcon(String kind) {
     final Color color;
     final IconData icon;
-
     switch (kind) {
       case 'renamed':
       case 'name_changed':
@@ -994,7 +1168,6 @@ class _ChangeListDetails extends StatelessWidget {
         color = AppColors.muted;
         icon = Icons.info_rounded;
     }
-
     return Icon(icon, size: 16, color: color);
   }
 }

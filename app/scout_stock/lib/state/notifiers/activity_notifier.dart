@@ -3,7 +3,49 @@ import 'package:scout_stock/data/api/api_client.dart';
 import 'package:scout_stock/domain/models/activity.dart';
 import 'package:scout_stock/state/providers/api_provider.dart';
 
-/// State for the activity log page.
+// ─── Filter enum ────────────────────────────────────────────────────────────
+
+enum ActivityFilter {
+  all,
+  items,
+  resolves,
+  buckets,
+  users;
+
+  /// Value sent to the backend ?filter= param. Null means no filter.
+  String? get apiValue {
+    switch (this) {
+      case ActivityFilter.all:
+        return null;
+      case ActivityFilter.items:
+        return 'items';
+      case ActivityFilter.resolves:
+        return 'resolves';
+      case ActivityFilter.buckets:
+        return 'buckets';
+      case ActivityFilter.users:
+        return 'users';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case ActivityFilter.all:
+        return 'All';
+      case ActivityFilter.items:
+        return 'Checkouts/Returns';
+      case ActivityFilter.resolves:
+        return 'Resolves';
+      case ActivityFilter.buckets:
+        return 'Buckets';
+      case ActivityFilter.users:
+        return 'Users';
+    }
+  }
+}
+
+// ─── State ──────────────────────────────────────────────────────────────────
+
 class ActivityState {
   const ActivityState({
     this.entries = const [],
@@ -11,6 +53,7 @@ class ActivityState {
     this.loading = false,
     this.loadingMore = false,
     this.query = '',
+    this.filter = ActivityFilter.all,
     this.error,
   });
 
@@ -19,6 +62,7 @@ class ActivityState {
   final bool loading;
   final bool loadingMore;
   final String query;
+  final ActivityFilter filter;
   final String? error;
 
   ActivityState copyWith({
@@ -27,6 +71,7 @@ class ActivityState {
     bool? loading,
     bool? loadingMore,
     String? query,
+    ActivityFilter? filter,
     String? error,
   }) {
     return ActivityState(
@@ -35,14 +80,14 @@ class ActivityState {
       loading: loading ?? this.loading,
       loadingMore: loadingMore ?? this.loadingMore,
       query: query ?? this.query,
+      filter: filter ?? this.filter,
       error: error,
     );
   }
 }
 
-/// Notifier that manages the admin activity log.
-///
-/// Supports paginated loading and search filtering.
+// ─── Notifier ───────────────────────────────────────────────────────────────
+
 class ActivityNotifier extends Notifier<ActivityState> {
   static const int _pageSize = 20;
 
@@ -54,19 +99,19 @@ class ActivityNotifier extends Notifier<ActivityState> {
 
   @override
   ActivityState build() {
-    // Kick off initial load
     Future.microtask(() => loadInitial());
     return const ActivityState(loading: true);
   }
 
-  /// Loads the first page of activity. Resets all state.
-  Future<void> loadInitial({String? query}) async {
+  /// Loads the first page. Resets all state.
+  Future<void> loadInitial({String? query, ActivityFilter? filter}) async {
     final q = query ?? state.query;
+    final f = filter ?? state.filter;
 
-    state = ActivityState(loading: true, query: q);
+    state = ActivityState(loading: true, query: q, filter: f);
 
     try {
-      final page = await _fetchPage(offset: 0, query: q);
+      final page = await _fetchPage(offset: 0, query: q, filter: f);
       state = state.copyWith(
         entries: page.items,
         hasMore: page.hasMore,
@@ -91,6 +136,7 @@ class ActivityNotifier extends Notifier<ActivityState> {
       final page = await _fetchPage(
         offset: state.entries.length,
         query: state.query,
+        filter: state.filter,
       );
       state = state.copyWith(
         entries: [...state.entries, ...page.items],
@@ -111,7 +157,12 @@ class ActivityNotifier extends Notifier<ActivityState> {
     await loadInitial(query: query.trim());
   }
 
-  /// Refresh (re-fetch from scratch keeping current query).
+  /// Set filter. Resets pagination.
+  Future<void> setFilter(ActivityFilter filter) async {
+    await loadInitial(filter: filter);
+  }
+
+  /// Refresh (re-fetch from scratch keeping current query + filter).
   Future<void> refresh() async {
     await loadInitial();
   }
@@ -119,6 +170,7 @@ class ActivityNotifier extends Notifier<ActivityState> {
   Future<ActivityPageResponse> _fetchPage({
     required int offset,
     required String query,
+    required ActivityFilter filter,
   }) async {
     final queryParams = <String, String>{
       'offset': offset.toString(),
@@ -126,6 +178,10 @@ class ActivityNotifier extends Notifier<ActivityState> {
     };
     if (query.isNotEmpty) {
       queryParams['q'] = query;
+    }
+    final apiFilter = filter.apiValue;
+    if (apiFilter != null) {
+      queryParams['filter'] = apiFilter;
     }
 
     final qs = queryParams.entries
