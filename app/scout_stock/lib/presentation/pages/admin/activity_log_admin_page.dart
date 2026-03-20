@@ -879,8 +879,9 @@ IconData _badgeIconFor(String action) {
 Widget _buildExpandedContent(ActivityEntry entry) {
   switch (entry.action) {
     case 'checkout':
+      return _CheckoutReturnDetails(items: entry.items, isCheckout: true);
     case 'return':
-      return _CheckoutReturnDetails(items: entry.items);
+      return _CheckoutReturnDetails(items: entry.items, isCheckout: false);
     case 'resolve':
       return _ResolveDetails(items: entry.items);
     case 'bucket_created':
@@ -898,24 +899,24 @@ Widget _buildExpandedContent(ActivityEntry entry) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _CheckoutReturnDetails extends StatelessWidget {
-  const _CheckoutReturnDetails({required this.items});
+  const _CheckoutReturnDetails({required this.items, required this.isCheckout});
   final List<ActivityItemDetail> items;
+  final bool isCheckout;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final qtyStyle = t.bodyMedium?.copyWith(
-        fontSize: 14,
-        fontWeight: FontWeight.w900,
-        color: AppColors.ink,
-        height: 1.1);
-    final itemStyle = t.bodyLarge?.copyWith(
-        fontSize: 15,
-        fontWeight: FontWeight.w800,
-        color: AppColors.ink,
-        height: 1.2);
-    final subStyle = t.bodyMedium
-        ?.copyWith(fontSize: 13, color: AppColors.muted, height: 1.25);
+    final actionStyle = t.bodyMedium?.copyWith(
+        fontSize: 14, fontWeight: FontWeight.w700, height: 1.35);
+    final detailStyle = t.bodyMedium?.copyWith(
+        fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.ink, height: 1.35);
+
+    final actionColor = isCheckout ? const Color(0xFF2F6FED) : AppColors.primary;
+    final actionIcon = isCheckout
+        ? Icons.arrow_downward_rounded
+        : Icons.arrow_upward_rounded;
+    final actionLabel = isCheckout ? 'checked out' : 'returned';
+    final preposition = isCheckout ? 'from' : 'to';
 
     return Container(
       width: double.infinity,
@@ -923,32 +924,32 @@ class _CheckoutReturnDetails extends StatelessWidget {
       decoration: const BoxDecoration(
           border: Border(top: BorderSide(color: AppColors.outline))),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (int i = 0; i < items.length; i++) ...[
-            if (i != 0) const SizedBox(height: 14),
-            Column(
+            if (i != 0) const SizedBox(height: 6),
+            Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    SizedBox(
-                        width: 34,
-                        child: Text("${items[i].quantity}×",
-                            textAlign: TextAlign.right, style: qtyStyle)),
-                    const SizedBox(width: 12),
-                    Expanded(
-                        child: Text(items[i].itemName,
-                            style: itemStyle, softWrap: true)),
-                  ],
+                Icon(actionIcon, size: 16, color: actionColor),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text.rich(TextSpan(children: [
+                    TextSpan(
+                      text: '$actionLabel ',
+                      style: actionStyle?.copyWith(color: actionColor),
+                    ),
+                    TextSpan(
+                      text: '×${items[i].quantity} of ${items[i].itemName}',
+                      style: detailStyle,
+                    ),
+                    if (items[i].bucketName != null)
+                      TextSpan(
+                        text: ' $preposition ${items[i].bucketName}',
+                        style: detailStyle?.copyWith(color: AppColors.muted),
+                      ),
+                  ])),
                 ),
-                if (items[i].bucketName != null)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 46),
-                    child: Text("from ${items[i].bucketName}",
-                        style: subStyle, softWrap: true),
-                  ),
               ],
             ),
           ],
@@ -1059,16 +1060,12 @@ class _BucketCreatedDetails extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final changeStyle = t.bodyMedium?.copyWith(
-        fontSize: 14,
-        fontWeight: FontWeight.w600,
-        color: AppColors.ink,
-        height: 1.35);
-    final labelStyle = t.bodyMedium?.copyWith(
-        fontSize: 14,
-        fontWeight: FontWeight.w700,
-        color: AppColors.primary,
-        height: 1.35);
+    final actionStyle = t.bodyMedium?.copyWith(
+        fontSize: 14, fontWeight: FontWeight.w700, height: 1.35);
+    final detailStyle = t.bodyMedium?.copyWith(
+        fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.ink, height: 1.35);
+
+    const actionColor = AppColors.primary;
 
     return Container(
       width: double.infinity,
@@ -1083,10 +1080,20 @@ class _BucketCreatedDetails extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("added ", style: labelStyle),
+                const Icon(Icons.add_circle_rounded, size: 16, color: actionColor),
+                const SizedBox(width: 8),
                 Expanded(
-                    child: Text("${items[i].quantity}× ${items[i].itemName}",
-                        style: changeStyle)),
+                  child: Text.rich(TextSpan(children: [
+                    TextSpan(
+                      text: 'added ',
+                      style: actionStyle?.copyWith(color: actionColor),
+                    ),
+                    TextSpan(
+                      text: '×${items[i].quantity} ${items[i].itemName}',
+                      style: detailStyle,
+                    ),
+                  ])),
+                ),
               ],
             ),
           ],
@@ -1107,11 +1114,10 @@ class _ChangeListDetails extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final changeStyle = t.bodyMedium?.copyWith(
-        fontSize: 14,
-        fontWeight: FontWeight.w600,
-        color: AppColors.ink,
-        height: 1.35);
+    final actionStyle = t.bodyMedium?.copyWith(
+        fontSize: 14, fontWeight: FontWeight.w700, height: 1.35);
+    final detailStyle = t.bodyMedium?.copyWith(
+        fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.ink, height: 1.35);
 
     return Container(
       width: double.infinity,
@@ -1123,53 +1129,125 @@ class _ChangeListDetails extends StatelessWidget {
         children: [
           for (int i = 0; i < changes.length; i++) ...[
             if (i != 0) const SizedBox(height: 6),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _changeIcon(changes[i].kind),
-                const SizedBox(width: 8),
-                Expanded(
-                    child: Text(changes[i].description, style: changeStyle)),
-              ],
-            ),
+            _buildChangeLine(changes[i], actionStyle, detailStyle),
           ],
         ],
       ),
     );
   }
 
-  Widget _changeIcon(String kind) {
-    final Color color;
-    final IconData icon;
+  Widget _buildChangeLine(
+    ActivityChangeDetail change,
+    TextStyle? actionStyle,
+    TextStyle? detailStyle,
+  ) {
+    final info = _changeInfo(change.kind);
+
+    // Split description into action word + detail for rich styling.
+    // e.g. "increased third item from 4× to 7×" → label="increased" detail="third item from 4× to 7×"
+    // e.g. "removed 10× fourth item" → label="removed" detail="10× fourth item"
+    // e.g. "changed role from Scout to Admin" → label="changed role" detail="from Scout to Admin"
+    final desc = change.description;
+    final label = info.label;
+
+    // Try to split: if description starts with the action word, split there
+    String detail;
+    if (desc.toLowerCase().startsWith(label.toLowerCase())) {
+      detail = desc.substring(label.length).trimLeft();
+    } else {
+      detail = desc;
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(info.icon, size: 16, color: info.color),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text.rich(TextSpan(children: [
+            TextSpan(
+              text: '$label ',
+              style: actionStyle?.copyWith(color: info.color),
+            ),
+            TextSpan(
+              text: detail,
+              style: detailStyle,
+            ),
+          ])),
+        ),
+      ],
+    );
+  }
+
+  _ChangeLineInfo _changeInfo(String kind) {
     switch (kind) {
       case 'renamed':
+        return const _ChangeLineInfo(
+          label: 'updated',
+          icon: Icons.swap_horiz_rounded,
+          color: Color(0xFFFF9800),
+        );
       case 'name_changed':
-        color = const Color(0xFFFF9800);
-        icon = Icons.swap_horiz_rounded;
+        return const _ChangeLineInfo(
+          label: 'updated',
+          icon: Icons.swap_horiz_rounded,
+          color: Color(0xFFFF9800),
+        );
       case 'item_added':
-        color = AppColors.primary;
-        icon = Icons.add_rounded;
+        return const _ChangeLineInfo(
+          label: 'added',
+          icon: Icons.add_circle_rounded,
+          color: AppColors.primary,
+        );
       case 'item_removed':
-        color = const Color(0xFFD92D20);
-        icon = Icons.remove_rounded;
+        return const _ChangeLineInfo(
+          label: 'removed',
+          icon: Icons.remove_circle_rounded,
+          color: Color(0xFFD92D20),
+        );
       case 'item_increased':
-        color = AppColors.primary;
-        icon = Icons.trending_up_rounded;
+        return const _ChangeLineInfo(
+          label: 'increased',
+          icon: Icons.trending_up_rounded,
+          color: AppColors.primary,
+        );
       case 'item_decreased':
-        color = const Color(0xFFFF9800);
-        icon = Icons.trending_down_rounded;
+        return const _ChangeLineInfo(
+          label: 'decreased',
+          icon: Icons.trending_down_rounded,
+          color: Color(0xFFFF9800),
+        );
       case 'role_changed':
-        color = const Color(0xFF2F6FED);
-        icon = Icons.shield_rounded;
+        return const _ChangeLineInfo(
+          label: 'changed role',
+          icon: Icons.shield_rounded,
+          color: Color(0xFF2F6FED),
+        );
       case 'password_reset':
-        color = AppColors.muted;
-        icon = Icons.lock_reset_rounded;
+        return const _ChangeLineInfo(
+          label: 'password',
+          icon: Icons.lock_reset_rounded,
+          color: AppColors.muted,
+        );
       default:
-        color = AppColors.muted;
-        icon = Icons.info_rounded;
+        return const _ChangeLineInfo(
+          label: '',
+          icon: Icons.info_rounded,
+          color: AppColors.muted,
+        );
     }
-    return Icon(icon, size: 16, color: color);
   }
+}
+
+class _ChangeLineInfo {
+  const _ChangeLineInfo({
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+  final String label;
+  final IconData icon;
+  final Color color;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
