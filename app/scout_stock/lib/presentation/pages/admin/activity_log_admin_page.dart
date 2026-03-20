@@ -24,15 +24,21 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
   final _scrollCtrl = ScrollController();
   final Map<String, ValueNotifier<bool>> _expanded = {};
   Timer? _searchDebounce;
+  Timer? _pollTimer;
 
   @override
   void initState() {
     super.initState();
     _scrollCtrl.addListener(_onScroll);
+    _pollTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => ref.read(activityProvider.notifier).poll(),
+    );
   }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _scrollCtrl.removeListener(_onScroll);
     _scrollCtrl.dispose();
     _searchDebounce?.cancel();

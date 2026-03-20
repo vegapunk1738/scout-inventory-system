@@ -167,6 +167,36 @@ class ActivityNotifier extends Notifier<ActivityState> {
     await loadInitial();
   }
 
+  /// Silent poll — fetches the latest page and prepends any new entries
+  /// that aren't already in the list. No loading spinners, no scroll reset.
+  /// Errors are silently swallowed (next poll will retry).
+  Future<void> poll() async {
+    // Don't poll while user is actively loading, searching, or filtering
+    if (state.loading || state.loadingMore) return;
+
+    try {
+      final page = await _fetchPage(
+        offset: 0,
+        query: state.query,
+        filter: state.filter,
+      );
+
+      if (page.items.isEmpty) return;
+
+      final existingIds = state.entries.map((e) => e.id).toSet();
+      final newItems =
+          page.items.where((e) => !existingIds.contains(e.id)).toList();
+
+      if (newItems.isEmpty) return;
+
+      state = state.copyWith(
+        entries: [...newItems, ...state.entries],
+      );
+    } catch (_) {
+      // Silently ignore poll errors — next tick will retry
+    }
+  }
+
   Future<ActivityPageResponse> _fetchPage({
     required int offset,
     required String query,
