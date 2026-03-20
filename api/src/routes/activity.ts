@@ -1,305 +1,216 @@
 import { Hono } from "hono";
-import { sql } from "drizzle-orm";
+import { sql, eq, and } from "drizzle-orm";
 import { Env } from "../types";
+import {
+  audit_logs,
+  transactions,
+  transaction_items,
+  item_types,
+  buckets,
+  users,
+} from "../db/schema";
 import { auth, requireRole } from "../middleware/auth";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
-
-/**
- * Unified activity entry returned by the API.
- *
- * `kind` splits into two families:
- *   - transaction kinds: checkout, return, resolved_lost, resolved_damaged
- *   - audit kinds:       bucket_created, bucket_updated, bucket_deleted,
- *                         user_created, user_updated, user_deleted
- */
-type ActivityKind =
-  | "checkout"
-  | "return"
-  | "resolved_lost"
-  | "resolved_damaged"
-  | "bucket_created"
-  | "bucket_updated"
-  | "bucket_deleted"
-  | "user_created"
-  | "user_updated"
-  | "user_deleted";
-
-// ─── Routes ─────────────────────────────────────────────────────────────────
 
 const activityRoutes = new Hono<Env>();
 
 activityRoutes.use("/*", auth(), requireRole("admin"));
 
-/**
- * GET /activity
- *
- * Query params:
- *   limit   — page size (default 20, max 100)
- *   offset  — pagination offset (default 0)
- *   since   — ISO timestamp; only return entries created after this
- *   entity  — filter: 'item' | 'bucket' | 'user' | 'admin' | 'all' (default 'all')
- *             'admin' = bucket + user combined
- *   action  — filter: 'checkout' | 'return' | 'resolved' | 'created' |
- *             'updated' | 'deleted' | 'all' (default 'all')
- *   q       — search query (matches actor name, summary)
- *
- * Response:
- * {
- *   data: ActivityEntry[],
- *   has_more: boolean,
- *   total: number          // total matching (for the current filters)
- * }
- */
+// ─── Unified activity item shape returned to the frontend ───────────────────
+
+interface ActivityItem {
+  id: string;
+  /** "bucket_created" | "bucket_updated" | "user_created" | "checkout" | … */
+  action: string;
+  actor_id: string;
+  actor_name: string;
+  /** Human-readable one-liner, e.g. "created Tent Pegs (SSB-TNT-912)" */
+  summary: string;
+  /** Structured detail for the expandable area */
+  meta: Record<string, unknown> | null;
+  created_at: string;
+  /** Where this row came from — helps the frontend pick icons/colors */
+  source: "audit" | "transaction";
+}
+
+// ─── GET /activity ──────────────────────────────────────────────────────────
+
 activityRoutes.get("/", async (c) => {
-  const d1 = c.env.DB;
+  const db = c.get("db");
 
-  const limit = Math.min(parseInt(c.req.query("limit") ?? "20", 10) || 20, 100);
-  const offset = parseInt(c.req.query("offset") ?? "0", 10) || 0;
-  const since = c.req.query("since") ?? null;
-  const entityFilter = c.req.query("entity") ?? "all";
-  const actionFilter = c.req.query("action") ?? "all";
-  const searchQuery = (c.req.query("q") ?? "").trim().toLowerCase();
+  const offset = Math.max(0, parseInt(c.req.query("offset") ?? "0", 10) || 0);
+  const limit = Math.min(parseInt(c.req.query("limit") ?? "20", 10) || 20, 50);
+  const q = (c.req.query("q") ?? "").trim().toLowerCase();
 
-  // ── Build a UNION ALL query over transactions + audit_logs ────────────
-  //
-  // We normalise both sources into the same shape:
-  //   id, kind, actor_id, actor_name, entity, summary, meta, created_at
-  //
-  // For transactions we join users + aggregate transaction_items into a
-  // JSON summary. For audit_logs we join the actor's name.
+  // We fetch (limit+1) from each source, merge, sort, slice — this gives us
+  // correct pagination across two tables without a UNION (D1/Drizzle limitation).
+  const fetchSize = limit + offset + 1; // over-fetch to cover offset
 
-  const whereClauses: string[] = [];
-  const params: unknown[] = [];
+  // ── 1. Audit logs (bucket/user CRUD) ────────────────────────────────────
 
-  // ── since filter
-  if (since) {
-    whereClauses.push("a.created_at > ?");
-    params.push(since);
+  let auditRows;
+  if (q) {
+    const pattern = `%${q}%`;
+    auditRows = await db
+      .select()
+      .from(audit_logs)
+      .where(
+        sql`(
+          LOWER(${audit_logs.summary}) LIKE ${pattern}
+          OR LOWER(${audit_logs.meta}) LIKE ${pattern}
+        )`
+      )
+      .orderBy(sql`${audit_logs.created_at} DESC`)
+      .limit(fetchSize);
+  } else {
+    auditRows = await db
+      .select()
+      .from(audit_logs)
+      .orderBy(sql`${audit_logs.created_at} DESC`)
+      .limit(fetchSize);
   }
 
-  // ── entity filter
-  if (entityFilter === "item") {
-    whereClauses.push("a.entity = 'item'");
-  } else if (entityFilter === "bucket") {
-    whereClauses.push("a.entity = 'bucket'");
-  } else if (entityFilter === "user") {
-    whereClauses.push("a.entity = 'user'");
-  } else if (entityFilter === "admin") {
-    // Combined bucket + user (all non-transaction activity)
-    whereClauses.push("a.entity IN ('bucket', 'user')");
-  }
-
-  // ── action filter
-  if (actionFilter === "checkout") {
-    whereClauses.push("a.kind = 'checkout'");
-  } else if (actionFilter === "return") {
-    whereClauses.push("a.kind = 'return'");
-  } else if (actionFilter === "resolved") {
-    whereClauses.push("a.kind IN ('resolved_lost', 'resolved_damaged')");
-  } else if (actionFilter === "created") {
-    whereClauses.push("a.kind LIKE '%_created'");
-  } else if (actionFilter === "updated") {
-    whereClauses.push("a.kind LIKE '%_updated'");
-  } else if (actionFilter === "deleted") {
-    whereClauses.push("a.kind LIKE '%_deleted'");
-  }
-
-  // ── search filter
-  if (searchQuery) {
-    whereClauses.push("(LOWER(a.actor_name) LIKE ? OR LOWER(a.summary) LIKE ? OR a.actor_scout_id LIKE ?)");
-    params.push(`%${searchQuery}%`, `%${searchQuery}%`, `%${searchQuery}%`);
-  }
-
-  const whereSQL = whereClauses.length > 0
-    ? "WHERE " + whereClauses.join(" AND ")
-    : "";
-
-  // ── The big UNION query ───────────────────────────────────────────────
-  //
-  // Part 1: Transactions → activity entries
-  //   Each transaction becomes one row. We aggregate its line items into
-  //   a JSON array stored in `meta`.
-  //
-  // Part 2: Audit logs → activity entries (already in the right shape)
-
-  const unionSQL = `
-    SELECT * FROM (
-      -- ── Transactions ──────────────────────────────────────────────
-      --
-      -- actor  = performed_by (who clicked the button) — falls back to user_id
-      -- target = user_id      (whose inventory changed)
-      --
-      -- When they differ, it means an admin acted on behalf of a scout.
-      SELECT
-        t.id                                                  AS id,
-        CASE
-          WHEN t.type = 'checkout' THEN 'checkout'
-          WHEN t.type = 'return' AND EXISTS (
-            SELECT 1 FROM transaction_items ti2
-            WHERE ti2.transaction_id = t.id AND ti2.status IN ('lost','damaged')
-          ) THEN 'resolved_' || (
-            SELECT ti3.status FROM transaction_items ti3
-            WHERE ti3.transaction_id = t.id AND ti3.status IN ('lost','damaged')
-            LIMIT 1
-          )
-          ELSE 'return'
-        END                                                   AS kind,
-        COALESCE(t.performed_by, t.user_id)                   AS actor_id,
-        COALESCE(performer.full_name, u.full_name, 'Unknown') AS actor_name,
-        COALESCE(performer.scout_id, u.scout_id, '')          AS actor_scout_id,
-        'item'                                                AS entity,
-        CASE
-          WHEN t.type = 'checkout' THEN
-            COALESCE(performer.full_name, u.full_name) || ' checked out ' ||
-            (SELECT COUNT(*) FROM transaction_items ti WHERE ti.transaction_id = t.id) ||
-            ' item(s)'
-          ELSE
-            COALESCE(performer.full_name, u.full_name) || ' returned ' ||
-            (SELECT COUNT(*) FROM transaction_items ti WHERE ti.transaction_id = t.id) ||
-            ' item(s)'
-        END                                                   AS summary,
-        -- Target user info (only meaningful when performed_by != user_id)
-        CASE WHEN t.performed_by IS NOT NULL AND t.performed_by != t.user_id
-          THEN COALESCE(u.full_name, 'Unknown')
-          ELSE ''
-        END                                                   AS target_user_name,
-        CASE WHEN t.performed_by IS NOT NULL AND t.performed_by != t.user_id
-          THEN COALESCE(u.scout_id, '')
-          ELSE ''
-        END                                                   AS target_user_scout_id,
-        (
-          SELECT json_group_array(
-            json_object(
-              'item_name', COALESCE(it.name, 'Deleted item'),
-              'item_emoji', COALESCE(it.emoji, '📦'),
-              'bucket_name', COALESCE(b.name, 'Deleted bucket'),
-              'bucket_barcode', COALESCE(b.barcode, ''),
-              'quantity', ti.quantity,
-              'status', ti.status
-            )
-          )
-          FROM transaction_items ti
-          LEFT JOIN item_types it ON ti.item_type_id = it.id
-          LEFT JOIN buckets b ON ti.bucket_id = b.id
-          WHERE ti.transaction_id = t.id
-        )                                                     AS meta,
-        t.created_at                                          AS created_at
-      FROM transactions t
-      LEFT JOIN users u ON t.user_id = u.id
-      LEFT JOIN users performer ON t.performed_by = performer.id
-
-      UNION ALL
-
-      -- ── Audit logs ────────────────────────────────────────────────
-      SELECT
-        al.id                                                 AS id,
-        al.entity || '_' || al.action                         AS kind,
-        al.actor_id                                           AS actor_id,
-        COALESCE(u2.full_name, 'Unknown')                     AS actor_name,
-        COALESCE(u2.scout_id, '')                             AS actor_scout_id,
-        al.entity                                             AS entity,
-        al.summary                                            AS summary,
-        ''                                                    AS target_user_name,
-        ''                                                    AS target_user_scout_id,
-        al.meta                                               AS meta,
-        al.created_at                                         AS created_at
-      FROM audit_logs al
-      LEFT JOIN users u2 ON al.actor_id = u2.id
-    ) a
-    ${whereSQL}
-    ORDER BY a.created_at DESC
-  `;
-
-  // ── Count query ───────────────────────────────────────────────────────
-  const countSQL = `SELECT COUNT(*) as total FROM (${unionSQL})`;
-  const countResult = await d1.prepare(countSQL).bind(...params).first<{ total: number }>();
-  const total = countResult?.total ?? 0;
-
-  // ── Data query with pagination ────────────────────────────────────────
-  const dataSQL = `${unionSQL} LIMIT ? OFFSET ?`;
-  const dataResult = await d1
-    .prepare(dataSQL)
-    .bind(...params, limit, offset)
-    .all();
-
-  const rows = (dataResult.results ?? []).map((row: any) => ({
+  const auditItems: ActivityItem[] = auditRows.map((row) => ({
     id: row.id,
-    kind: row.kind,
+    action: `${row.entity}_${row.action}`, // e.g. "bucket_created", "user_updated"
     actor_id: row.actor_id,
-    actor_name: row.actor_name,
-    actor_scout_id: row.actor_scout_id ?? '',
-    entity: row.entity,
+    actor_name: "", // filled below
     summary: row.summary,
-    target_user_name: row.target_user_name ?? '',
-    target_user_scout_id: row.target_user_scout_id ?? '',
-    meta: row.meta ? tryParseJSON(row.meta) : null,
+    meta: row.meta ? JSON.parse(row.meta) : null,
     created_at: row.created_at,
+    source: "audit" as const,
   }));
 
-  return c.json({
-    data: rows,
-    has_more: offset + limit < total,
-    total,
-  });
-});
-
-/**
- * GET /activity/poll
- *
- * Lightweight endpoint for polling. Returns only the count of new entries
- * since a given timestamp, plus the latest entry's timestamp.
- *
- * Query params:
- *   since — ISO timestamp (required)
- *
- * Response:
- * {
- *   new_count: number,
- *   latest_at: string | null
- * }
- */
-activityRoutes.get("/poll", async (c) => {
-  const d1 = c.env.DB;
-  const since = c.req.query("since");
-
-  if (!since) {
-    return c.json({ error: "Missing 'since' parameter" }, 400);
+  // Resolve actor names for audit logs
+  const actorIds = [...new Set(auditRows.map((r) => r.actor_id))];
+  const actorMap = new Map<string, string>();
+  for (const actorId of actorIds) {
+    const user = (
+      await db
+        .select({ full_name: users.full_name })
+        .from(users)
+        .where(eq(users.id, actorId))
+        .limit(1)
+    )[0];
+    actorMap.set(actorId, user?.full_name ?? "Unknown");
+  }
+  for (const item of auditItems) {
+    item.actor_name = actorMap.get(item.actor_id) ?? "Unknown";
   }
 
-  const countSQL = `
-    SELECT COUNT(*) as cnt FROM (
-      SELECT created_at FROM transactions WHERE created_at > ?1
-      UNION ALL
-      SELECT created_at FROM audit_logs WHERE created_at > ?1
-    )
-  `;
+  // ── 2. Transactions (checkout / return) ─────────────────────────────────
 
-  const latestSQL = `
-    SELECT MAX(created_at) as latest_at FROM (
-      SELECT created_at FROM transactions WHERE created_at > ?1
-      UNION ALL
-      SELECT created_at FROM audit_logs WHERE created_at > ?1
-    )
-  `;
+  // Fetch recent transactions with actor name
+  let txRows;
+  if (q) {
+    const pattern = `%${q}%`;
+    txRows = await db
+      .select({
+        id: transactions.id,
+        type: transactions.type,
+        user_id: transactions.user_id,
+        performed_by: transactions.performed_by,
+        created_at: transactions.created_at,
+        user_name: sql<string>`(SELECT full_name FROM users WHERE id = ${transactions.user_id})`,
+        performer_name: sql<string>`(SELECT full_name FROM users WHERE id = ${transactions.performed_by})`,
+      })
+      .from(transactions)
+      .where(
+        sql`(
+          LOWER((SELECT full_name FROM users WHERE id = ${transactions.user_id})) LIKE ${pattern}
+          OR LOWER(${transactions.type}) LIKE ${pattern}
+        )`
+      )
+      .orderBy(sql`${transactions.created_at} DESC`)
+      .limit(fetchSize);
+  } else {
+    txRows = await db
+      .select({
+        id: transactions.id,
+        type: transactions.type,
+        user_id: transactions.user_id,
+        performed_by: transactions.performed_by,
+        created_at: transactions.created_at,
+        user_name: sql<string>`(SELECT full_name FROM users WHERE id = ${transactions.user_id})`,
+        performer_name: sql<string>`(SELECT full_name FROM users WHERE id = ${transactions.performed_by})`,
+      })
+      .from(transactions)
+      .orderBy(sql`${transactions.created_at} DESC`)
+      .limit(fetchSize);
+  }
 
-  const [countRes, latestRes] = await Promise.all([
-    d1.prepare(countSQL).bind(since).first<{ cnt: number }>(),
-    d1.prepare(latestSQL).bind(since).first<{ latest_at: string | null }>(),
-  ]);
+  // For each transaction, fetch its line items
+  const txItems: ActivityItem[] = await Promise.all(
+    txRows.map(async (tx) => {
+      const lines = await db
+        .select({
+          quantity: transaction_items.quantity,
+          direction: transaction_items.direction,
+          item_name: sql<string>`COALESCE(${item_types.name}, 'Deleted item')`,
+          item_emoji: sql<string>`COALESCE(${item_types.emoji}, '📦')`,
+          bucket_name: sql<string>`COALESCE(${buckets.name}, 'Deleted bucket')`,
+          bucket_barcode: sql<string>`COALESCE(${buckets.barcode}, '')`,
+        })
+        .from(transaction_items)
+        .leftJoin(item_types, eq(transaction_items.item_type_id, item_types.id))
+        .leftJoin(buckets, eq(transaction_items.bucket_id, buckets.id))
+        .where(eq(transaction_items.transaction_id, tx.id));
+
+      const totalQty = lines.reduce((s, l) => s + l.quantity, 0);
+      const actionWord = tx.type === "checkout" ? "checked out" : "returned";
+
+      // The actor is whoever performed the action. If performed_by exists
+      // (admin acting on behalf of a scout), use the performer as actor
+      // and mention the scout in the summary. Otherwise the user is the actor.
+      const actorName = tx.performer_name ?? tx.user_name ?? "Unknown";
+      const isOnBehalf = tx.performed_by && tx.performed_by !== tx.user_id;
+
+      let summary: string;
+      if (isOnBehalf) {
+        summary = `${actionWord} ${totalQty} ${totalQty === 1 ? "item" : "items"} for ${tx.user_name ?? "someone"}`;
+      } else {
+        summary = `${actionWord} ${totalQty} ${totalQty === 1 ? "item" : "items"}`;
+      }
+
+      return {
+        id: tx.id,
+        action: tx.type, // "checkout" | "return"
+        actor_id: tx.performed_by ?? tx.user_id,
+        actor_name: actorName,
+        summary,
+        meta: {
+          transaction_id: tx.id,
+          user_id: tx.user_id,
+          user_name: tx.user_name,
+          item_count: totalQty,
+          items: lines.map((l) => ({
+            quantity: l.quantity,
+            item_name: l.item_name,
+            item_emoji: l.item_emoji,
+            bucket_name: l.bucket_name,
+            bucket_barcode: l.bucket_barcode,
+          })),
+        },
+        created_at: tx.created_at,
+        source: "transaction" as const,
+      };
+    })
+  );
+
+  // ── 3. Merge, sort, paginate ────────────────────────────────────────────
+
+  const merged = [...auditItems, ...txItems];
+  merged.sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  const sliced = merged.slice(offset, offset + limit + 1);
+  const hasMore = sliced.length > limit;
+  const data = sliced.slice(0, limit);
 
   return c.json({
-    new_count: countRes?.cnt ?? 0,
-    latest_at: latestRes?.latest_at ?? null,
+    data,
+    has_more: hasMore,
+    offset,
+    limit,
   });
 });
-
-function tryParseJSON(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
-}
 
 export { activityRoutes };

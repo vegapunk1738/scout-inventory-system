@@ -5,7 +5,7 @@ import { Env } from "../types";
 import { buckets, item_types, transaction_items, transactions, users } from "../db/schema";
 import { NotFoundError, ConflictError, ForbiddenError } from "../lib/errors";
 import { auth, requireRole } from "../middleware/auth";
-import { writeAuditLog } from "../lib/audit";
+import { writeAuditLog, computeBucketChanges } from "../lib/audit";
 
 // ─── Validation schemas ─────────────────────────────────────────────────────
 
@@ -384,6 +384,7 @@ bucketRoutes.patch("/:id", requireRole("admin"), async (c) => {
   const id = c.req.param("id");
   const body = UpdateBucketBody.parse(await c.req.json());
   const db = c.get("db");
+  const jwt = c.get("jwtPayload");
 
   const existing = (
     await db
@@ -510,38 +511,34 @@ bucketRoutes.patch("/:id", requireRole("admin"), async (c) => {
     })
   );
 
-  // Build a changes array describing what was modified
-  const changes: string[] = [];
-  if (body.name && body.name !== existing.name) {
-    changes.push(`name: "${existing.name}" → "${body.name}"`);
-  }
-  if (body.items) {
-    const oldCount = existingItems.length;
-    const newCount = items.length;
-    if (newCount !== oldCount) {
-      changes.push(`items: ${oldCount} → ${newCount}`);
-    } else {
-      changes.push("items updated");
-    }
-  }
+  // ── Audit: compute structured diff ──
+  const changes = computeBucketChanges(
+    existing.name,
+    body.name,
+    existingItems.map((i) => ({
+      id: i.id,
+      name: i.name,
+      emoji: i.emoji,
+      quantity: i.quantity,
+    })),
+    body.items
+  );
 
-  await writeAuditLog(db, {
-    actor_id: c.get("jwtPayload").sub,
-    entity: "bucket",
-    entity_id: id,
-    action: "updated",
-    summary: `Updated bucket "${body.name ?? existing.name}"`,
-    meta: {
-      name: body.name ?? existing.name,
-      barcode: existing.barcode,
-      changes,
-      items: itemsWithAvailable.map((i: any) => ({
-        name: i.name,
-        emoji: i.emoji,
-        quantity: i.quantity,
-      })),
-    },
-  });
+  if (changes.length > 0) {
+    const displayName = body.name ?? existing.name;
+    await writeAuditLog(db, {
+      actor_id: jwt.sub,
+      entity: "bucket",
+      entity_id: id,
+      action: "updated",
+      summary: `Updated bucket "${displayName}" (${existing.barcode})`,
+      meta: {
+        name: displayName,
+        barcode: existing.barcode,
+        changes,
+      },
+    });
+  }
 
   return c.json({
     data: {

@@ -7,7 +7,7 @@ import { hashPassword } from "../lib/crypto";
 import { NotFoundError, ConflictError, ForbiddenError } from "../lib/errors";
 import { auth, requireRole } from "../middleware/auth";
 import { SEED_USERS } from "../lib/seed";
-import { writeAuditLog } from "../lib/audit";
+import { writeAuditLog, computeUserChanges } from "../lib/audit";
 
 // ─── Validation schemas ─────────────────────────────────────────────────────
 const CreateUserBody = z.object({
@@ -290,31 +290,27 @@ userRoutes.patch("/:identifier", async (c) => {
       .returning()
   )[0];
 
-  // Build a changes array describing exactly what was modified
-  const changes: string[] = [];
-  if (body.full_name && body.full_name !== existing.full_name) {
-    changes.push(`name: "${existing.full_name}" → "${body.full_name}"`);
-  }
-  if (body.role && body.role !== existing.role) {
-    changes.push(`role: ${existing.role} → ${body.role}`);
-  }
-  if (body.password) {
-    changes.push("password changed");
-  }
+  // ── Audit: compute structured diff ──
+  const changes = computeUserChanges(
+    { full_name: existing.full_name, role: existing.role },
+    { full_name: body.full_name, role: body.role, password: body.password }
+  );
 
-  await writeAuditLog(db, {
-    actor_id: c.get("jwtPayload").sub,
-    entity: "user",
-    entity_id: existing.id,
-    action: "updated",
-    summary: `Updated user "${updated.full_name}" (Scout #${existing.scout_id})`,
-    meta: {
-      full_name: updated.full_name,
-      scout_id: existing.scout_id,
-      role: updated.role,
-      changes,
-    },
-  });
+  if (changes.length > 0) {
+    await writeAuditLog(db, {
+      actor_id: c.get("jwtPayload").sub,
+      entity: "user",
+      entity_id: existing.id,
+      action: "updated",
+      summary: `Updated user "${updated.full_name}" (Scout #${existing.scout_id})`,
+      meta: {
+        full_name: updated.full_name,
+        scout_id: existing.scout_id,
+        role: updated.role,
+        changes,
+      },
+    });
+  }
 
   return c.json({ data: sanitize(updated) });
 });

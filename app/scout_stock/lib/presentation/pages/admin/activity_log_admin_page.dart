@@ -1,14 +1,14 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:scout_stock/domain/models/activity.dart';
 import 'package:scout_stock/presentation/widgets/dotted_background.dart';
-import 'package:scout_stock/state/notifiers/activity_notifier.dart';
 import 'package:scout_stock/state/providers/activity_provider.dart';
 import 'package:scout_stock/theme/app_theme.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Activity Log Page — connected to real backend with polling + animations
+// Activity Log Page — wired to real API via activityProvider
 // ═══════════════════════════════════════════════════════════════════════════
 
 class ActivityLogPage extends ConsumerStatefulWidget {
@@ -21,6 +21,8 @@ class ActivityLogPage extends ConsumerStatefulWidget {
 class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
   final _searchCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
+  final Map<String, ValueNotifier<bool>> _expanded = {};
+  Timer? _searchDebounce;
 
   @override
   void initState() {
@@ -32,9 +34,17 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
   void dispose() {
     _scrollCtrl.removeListener(_onScroll);
     _scrollCtrl.dispose();
+    _searchDebounce?.cancel();
     _searchCtrl.dispose();
+    for (final n in _expanded.values) {
+      n.dispose();
+    }
+    _expanded.clear();
     super.dispose();
   }
+
+  ValueNotifier<bool> _exp(String id) =>
+      _expanded.putIfAbsent(id, () => ValueNotifier<bool>(false));
 
   void _onScroll() {
     if (!_scrollCtrl.hasClients) return;
@@ -45,26 +55,33 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
   }
 
   void _onSearchChanged(String v) {
-    ref.read(activityProvider.notifier).setSearchQuery(v.trim());
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      ref.read(activityProvider.notifier).search(v.trim());
+      for (final n in _expanded.values) {
+        n.dispose();
+      }
+      _expanded.clear();
+    });
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(activityProvider);
-    final notifier = ref.read(activityProvider.notifier);
     final t = Theme.of(context).textTheme;
     final tokens = Theme.of(context).extension<AppTokens>()!;
     final emojiBase = GoogleFonts.notoColorEmoji(height: 1);
-
     final mediaTop = MediaQuery.of(context).padding.top;
     final safeBottom = MediaQuery.of(context).padding.bottom;
 
-    final isEmpty = !state.loading && state.entries.isEmpty;
     const navHeight = 78.0;
     const navPad = 12.0;
     final bottomFootprint = safeBottom + navHeight + navPad + 10;
 
-    final rows = _buildRows(state.entries);
+    final activity = ref.watch(activityProvider);
+    final entries = activity.entries;
+    final rows = _buildRows(entries);
+    final isEmpty = !activity.loading && entries.isEmpty;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -75,50 +92,71 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
             top: false,
             child: CustomScrollView(
               controller: _scrollCtrl,
-              cacheExtent: 900,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               slivers: [
+                SliverToBoxAdapter(child: SizedBox(height: mediaTop + 16)),
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: EdgeInsets.fromLTRB(20, mediaTop + 10, 20, 0),
-                    child: _ActivityHeader(newCount: state.newEntryIds.length),
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: _ActivityHeader(
+                      onFilter: () {},
+                      onExport: () {},
+                    ),
                   ),
                 ),
+                const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
                 SliverPersistentHeader(
                   pinned: true,
                   delegate: _StickyHeaderDelegate(
-                    height: 70,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+                    height: 72,
+                    child: Container(
+                      color: AppColors.background,
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                       child: _SearchCard(
                         controller: _searchCtrl,
-                        hintText: 'Search user, item, or bucket…',
                         onChanged: _onSearchChanged,
+                        hintText: 'Search user, item, or bucket…',
                       ),
                     ),
                   ),
                 ),
 
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
-                    child: _UnifiedFilterRow(
-                      selected: state.filter,
-                      onTap: notifier.setFilter,
-                    ),
-                  ),
-                ),
-
-                if (state.loading)
+                if (activity.loading)
                   const SliverFillRemaining(
                     hasScrollBody: false,
                     child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (activity.error != null && entries.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('😵',
+                                style: emojiBase.copyWith(fontSize: 54)),
+                            const SizedBox(height: 12),
+                            Text('Failed to load activity',
+                                style: t.titleLarge,
+                                textAlign: TextAlign.center),
+                            const SizedBox(height: 8),
+                            Text(activity.error!,
+                                style: t.bodyLarge
+                                    ?.copyWith(color: AppColors.muted),
+                                textAlign: TextAlign.center),
+                          ],
+                        ),
+                      ),
+                    ),
                   )
                 else if (isEmpty)
                   SliverFillRemaining(
                     hasScrollBody: false,
                     child: _EmptyActivityState(
-                      query: state.searchQuery,
+                      query: activity.query,
                       emojiBase: emojiBase,
                       titleStyle: t.titleLarge,
                       bodyStyle: t.bodyLarge?.copyWith(color: AppColors.muted),
@@ -140,16 +178,12 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
                           }
 
                           final entry = row.entry!;
-                          final isNew = state.newEntryIds.contains(entry.id);
-
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 12),
                             child: RepaintBoundary(
-                              child: _GlowingEntryCard(
+                              child: _ExpandableActivityCard(
                                 entry: entry,
-                                isNew: isNew,
-                                onGlowComplete: () =>
-                                    notifier.markSeen(entry.id),
+                                expanded: _exp(entry.id),
                                 radiusXl: tokens.radiusXl,
                               ),
                             ),
@@ -169,7 +203,9 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (!state.loading && !isEmpty && state.loadingMore)
+                        if (!activity.loading &&
+                            !isEmpty &&
+                            activity.loadingMore)
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 10),
                             child: SizedBox(
@@ -178,14 +214,15 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             ),
                           )
-                        else if (!state.loading && !isEmpty && !state.hasMore)
+                        else if (!activity.loading &&
+                            !isEmpty &&
+                            !activity.hasMore)
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             child: Text(
                               "No more activity",
-                              style: t.bodyMedium?.copyWith(
-                                color: AppColors.muted,
-                              ),
+                              style: t.bodyMedium
+                                  ?.copyWith(color: AppColors.muted),
                             ),
                           ),
                       ],
@@ -208,12 +245,50 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _ActivityHeader extends StatelessWidget {
-  const _ActivityHeader({required this.newCount});
-  final int newCount;
+  const _ActivityHeader({required this.onFilter, required this.onExport});
+  final VoidCallback onFilter;
+  final VoidCallback onExport;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
+    final tokens = Theme.of(context).extension<AppTokens>()!;
+
+    Widget invisibleCircleButton({
+      required IconData icon,
+      required String tooltip,
+      required VoidCallback onPressed,
+    }) {
+      return Visibility(
+        visible: false,
+        maintainSize: true,
+        maintainAnimation: true,
+        maintainState: true,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: AppColors.primary,
+            shape: BoxShape.circle,
+            boxShadow: tokens.glowShadow,
+          ),
+          child: SizedBox(
+            width: 42,
+            height: 42,
+            child: IconButton(
+              onPressed: onPressed,
+              icon: Icon(icon, color: Colors.white),
+              splashRadius: 28,
+              tooltip: tooltip,
+              style: IconButton.styleFrom(
+                splashFactory: NoSplash.splashFactory,
+                hoverColor: Colors.transparent,
+                highlightColor: Colors.transparent,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -223,191 +298,38 @@ class _ActivityHeader extends StatelessWidget {
             children: [
               Text('Activity Log', style: t.titleLarge),
               const SizedBox(height: 4),
-              Row(
-                children: [
-                  Text(
-                    'ADMIN VIEW',
-                    style: t.labelMedium?.copyWith(
-                      color: AppColors.primary,
-                      letterSpacing: 1.8,
-                    ),
-                  ),
-                  if (newCount > 0) ...[
-                    const SizedBox(width: 10),
-                    _LiveDot(),
-                  ],
-                ],
+              Text(
+                'ADMIN VIEW',
+                style: t.labelMedium?.copyWith(
+                  color: AppColors.primary,
+                  letterSpacing: 1.8,
+                ),
               ),
             ],
           ),
+        ),
+        const SizedBox(width: 10),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            invisibleCircleButton(
+                icon: Icons.tune_rounded,
+                tooltip: 'Filter',
+                onPressed: onFilter),
+            const SizedBox(width: 10),
+            invisibleCircleButton(
+                icon: Icons.download_rounded,
+                tooltip: 'Export',
+                onPressed: onExport),
+          ],
         ),
       ],
     );
   }
 }
 
-class _LiveDot extends StatefulWidget {
-  @override
-  State<_LiveDot> createState() => _LiveDotState();
-}
-
-class _LiveDotState extends State<_LiveDot>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _ctrl,
-      builder: (context, _) {
-        final opacity = 0.4 + 0.6 * _ctrl.value;
-        return Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: AppColors.primary.withValues(alpha: opacity),
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.primary.withValues(alpha: 0.4 * _ctrl.value),
-                blurRadius: 6,
-                spreadRadius: 1,
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
-// Unified filter row
-// ═══════════════════════════════════════════════════════════════════════════
-
-class _UnifiedFilterRow extends StatelessWidget {
-  const _UnifiedFilterRow({required this.selected, required this.onTap});
-
-  final ActivityFilter selected;
-  final ValueChanged<ActivityFilter> onTap;
-
-  static const _icons = <ActivityFilter, IconData>{
-    ActivityFilter.all: Icons.dashboard_rounded,
-    ActivityFilter.checkouts: Icons.arrow_upward_rounded,
-    ActivityFilter.returns: Icons.arrow_downward_rounded,
-    ActivityFilter.resolved: Icons.search_off_rounded,
-    ActivityFilter.admin: Icons.shield_rounded,
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      clipBehavior: Clip.none,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          children: ActivityFilter.values.map((f) {
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: _FilterChip(
-                label: f.label,
-                icon: _icons[f],
-                isSelected: f == selected,
-                onTap: () => onTap(f),
-              ),
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Filter chip
-// ═══════════════════════════════════════════════════════════════════════════
-
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({
-    required this.label,
-    required this.isSelected,
-    required this.onTap,
-    this.icon,
-  });
-
-  final String label;
-  final bool isSelected;
-  final VoidCallback onTap;
-  final IconData? icon;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    final bg = isSelected ? AppColors.primary : Colors.white;
-    final fg = isSelected ? Colors.white : AppColors.ink;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: isSelected ? AppColors.primary : AppColors.outline,
-          ),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: AppColors.primary.withValues(alpha: 0.35),
-                    blurRadius: 14,
-                    spreadRadius: 0,
-                    offset: Offset.zero,
-                  ),
-                ]
-              : null,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 16, color: fg),
-              const SizedBox(width: 6),
-            ],
-            Text(
-              label,
-              style: t.titleMedium?.copyWith(
-                color: fg,
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Search card
+// Search Card
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _SearchCard extends StatelessWidget {
@@ -416,7 +338,6 @@ class _SearchCard extends StatelessWidget {
     required this.onChanged,
     required this.hintText,
   });
-
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
   final String hintText;
@@ -491,7 +412,7 @@ class _SearchCard extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Sticky header delegate
+// Sticky Header Delegate
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
@@ -505,394 +426,16 @@ class _StickyHeaderDelegate extends SliverPersistentHeaderDelegate {
   double get maxExtent => height;
 
   @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return child;
-  }
+  Widget build(BuildContext c, double shrinkOffset, bool overlapsContent) =>
+      child;
 
   @override
-  bool shouldRebuild(covariant _StickyHeaderDelegate oldDelegate) {
-    return oldDelegate.height != height || oldDelegate.child != child;
-  }
+  bool shouldRebuild(covariant _StickyHeaderDelegate old) =>
+      old.height != height || old.child != child;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Glowing entry card
-// ═══════════════════════════════════════════════════════════════════════════
-
-class _GlowingEntryCard extends StatefulWidget {
-  const _GlowingEntryCard({
-    required this.entry,
-    required this.isNew,
-    required this.onGlowComplete,
-    required this.radiusXl,
-  });
-
-  final ActivityEntry entry;
-  final bool isNew;
-  final VoidCallback onGlowComplete;
-  final double radiusXl;
-
-  @override
-  State<_GlowingEntryCard> createState() => _GlowingEntryCardState();
-}
-
-class _GlowingEntryCardState extends State<_GlowingEntryCard>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _glowCtrl;
-  late Animation<double> _glowAnim;
-  bool _expanded = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _glowCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2400),
-    );
-    _glowAnim = TweenSequence<double>([
-      TweenSequenceItem(tween: Tween(begin: 0, end: 1), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: 1, end: 0.6), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: 0.6, end: 1), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: 1, end: 0), weight: 2),
-    ]).animate(CurvedAnimation(parent: _glowCtrl, curve: Curves.easeOut));
-
-    if (widget.isNew) {
-      _glowCtrl.forward().then((_) {
-        if (mounted) widget.onGlowComplete();
-      });
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant _GlowingEntryCard old) {
-    super.didUpdateWidget(old);
-    if (widget.isNew && !old.isNew) {
-      _glowCtrl.forward(from: 0).then((_) {
-        if (mounted) widget.onGlowComplete();
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _glowCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final entry = widget.entry;
-    return AnimatedBuilder(
-      animation: _glowAnim,
-      builder: (context, child) {
-        final v = _glowAnim.value;
-        return Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(widget.radiusXl),
-            boxShadow: v > 0.01
-                ? [
-                    BoxShadow(
-                      color: _stripColor(entry).withValues(alpha: 0.45 * v),
-                      blurRadius: 20 * v,
-                      spreadRadius: 2 * v,
-                    ),
-                  ]
-                : null,
-          ),
-          child: child,
-        );
-      },
-      child: _EntryCardContent(
-        entry: entry,
-        expanded: _expanded,
-        onTap: () => setState(() => _expanded = !_expanded),
-        radiusXl: widget.radiusXl,
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Entry card content
-// ═══════════════════════════════════════════════════════════════════════════
-
-class _EntryCardContent extends StatelessWidget {
-  const _EntryCardContent({
-    required this.entry,
-    required this.expanded,
-    required this.onTap,
-    required this.radiusXl,
-  });
-
-  final ActivityEntry entry;
-  final bool expanded;
-  final VoidCallback onTap;
-  final double radiusXl;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    final stripColor = _stripColor(entry);
-    final initials = _initials(entry.actorName);
-    final timeText = _formatTime(context, entry.createdAt);
-    final hasDetails = entry.isTransaction && entry.lineItems.isNotEmpty;
-
-    return Material(
-      color: Colors.white,
-      elevation: 2,
-      shadowColor: const Color(0x14000000),
-      borderRadius: BorderRadius.circular(radiusXl),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: hasDetails ? onTap : null,
-        splashFactory: NoSplash.splashFactory,
-        hoverColor: Colors.transparent,
-        highlightColor: Colors.transparent,
-        child: Column(
-          children: [
-            // ── Main row ────────────────────────────────────────────
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // ── Color strip ─────────────────────────────────────
-                  Container(
-                    width: 6,
-                    constraints: const BoxConstraints(minHeight: 84),
-                    color: stripColor,
-                  ),
-                  const SizedBox(width: 14),
-
-                  // ── Avatar (pinned to top) ──────────────────────────
-                  Padding(
-                    padding: const EdgeInsets.only(top: 18),
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        CircleAvatar(
-                          radius: 22,
-                          backgroundColor: AppColors.background,
-                          child: entry.isTransaction
-                              ? Text(
-                                  initials,
-                                  style: t.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                )
-                              : Icon(
-                                  _entityIcon(entry),
-                                  size: 20,
-                                  color: stripColor,
-                                ),
-                        ),
-                        Positioned(
-                          left: -2,
-                          bottom: -2,
-                          child: Container(
-                            width: 18,
-                            height: 18,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(999),
-                              border: Border.all(color: AppColors.outline),
-                            ),
-                            child: Icon(
-                              _actionIcon(entry),
-                              size: 12,
-                              color: stripColor,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-
-                  // ── Text content ────────────────────────────────────
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            entry.actorName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: t.titleMedium?.copyWith(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.ink,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            entry.detailLabel,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: t.bodyMedium?.copyWith(
-                              color: AppColors.ink,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // ── Time (pinned to top) ────────────────────────────
-                  Padding(
-                    padding: const EdgeInsets.only(top: 14, right: 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          timeText,
-                          style: t.bodyMedium?.copyWith(color: AppColors.muted),
-                        ),
-                        if (hasDetails) ...[
-                          const SizedBox(height: 8),
-                          Icon(
-                            expanded
-                                ? Icons.keyboard_arrow_up_rounded
-                                : Icons.keyboard_arrow_down_rounded,
-                            color: AppColors.muted,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // ── Expandable details ──────────────────────────────────
-            AnimatedCrossFade(
-              crossFadeState: expanded
-                  ? CrossFadeState.showSecond
-                  : CrossFadeState.showFirst,
-              duration: const Duration(milliseconds: 160),
-              firstChild: const SizedBox.shrink(),
-              secondChild: hasDetails
-                  ? _DetailsBlock(lines: entry.lineItems)
-                  : const SizedBox.shrink(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Details block (transaction line items)
-// ═══════════════════════════════════════════════════════════════════════════
-
-class _DetailsBlock extends StatelessWidget {
-  const _DetailsBlock({required this.lines});
-  final List<ActivityLineItem> lines;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-
-    final qtyStyle = t.bodyMedium?.copyWith(
-      fontSize: 14,
-      fontWeight: FontWeight.w900,
-      color: AppColors.ink,
-      height: 1.1,
-    );
-    final itemStyle = t.bodyLarge?.copyWith(
-      fontSize: 15,
-      fontWeight: FontWeight.w800,
-      color: AppColors.ink,
-      height: 1.2,
-    );
-    final subStyle = t.bodyMedium?.copyWith(
-      fontSize: 13,
-      color: AppColors.muted,
-      height: 1.25,
-    );
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: AppColors.outline)),
-      ),
-      child: Column(
-        children: [
-          for (int i = 0; i < lines.length; i++) ...[
-            if (i != 0) const SizedBox(height: 14),
-            _DetailLineWidget(
-              line: lines[i],
-              qtyStyle: qtyStyle,
-              itemStyle: itemStyle,
-              subStyle: subStyle,
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _DetailLineWidget extends StatelessWidget {
-  const _DetailLineWidget({
-    required this.line,
-    required this.qtyStyle,
-    required this.itemStyle,
-    required this.subStyle,
-  });
-
-  final ActivityLineItem line;
-  final TextStyle? qtyStyle;
-  final TextStyle? itemStyle;
-  final TextStyle? subStyle;
-
-  @override
-  Widget build(BuildContext context) {
-    final statusSuffix = line.status != 'normal' ? ' (${line.status})' : '';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            SizedBox(
-              width: 34,
-              child: Text(
-                "${line.quantity}×",
-                textAlign: TextAlign.right,
-                style: qtyStyle,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                '${line.itemName}$statusSuffix',
-                style: itemStyle,
-                softWrap: true,
-              ),
-            ),
-          ],
-        ),
-        Padding(
-          padding: const EdgeInsets.only(left: 46),
-          child: Text(
-            "from ${line.bucketName}",
-            style: subStyle,
-            softWrap: true,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Empty state
+// Empty State
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _EmptyActivityState extends StatelessWidget {
@@ -902,7 +445,6 @@ class _EmptyActivityState extends StatelessWidget {
     required this.titleStyle,
     required this.bodyStyle,
   });
-
   final String query;
   final TextStyle emojiBase;
   final TextStyle? titleStyle;
@@ -934,7 +476,7 @@ class _EmptyActivityState extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Row building (date-grouped)
+// Row Model + Builder
 // ═══════════════════════════════════════════════════════════════════════════
 
 enum _RowKind { groupHeader, entry }
@@ -959,27 +501,25 @@ class _ActivityRow {
     required String titleRight,
     double topGap = 0,
   }) : this._(
-         kind: _RowKind.groupHeader,
-         titleLeft: titleLeft,
-         titleRight: titleRight,
-         topGap: topGap,
-       );
+            kind: _RowKind.groupHeader,
+            titleLeft: titleLeft,
+            titleRight: titleRight,
+            topGap: topGap);
 
   const _ActivityRow.entry(ActivityEntry entry)
-    : this._(kind: _RowKind.entry, entry: entry);
+      : this._(kind: _RowKind.entry, entry: entry);
 }
 
 List<_ActivityRow> _buildRows(List<ActivityEntry> entries) {
-  if (entries.isEmpty) return const [];
+  if (entries.isEmpty) return const <_ActivityRow>[];
 
   final map = <DateTime, List<ActivityEntry>>{};
   for (final e in entries) {
     final key = _dateOnly(e.createdAt);
-    (map[key] ??= []).add(e);
+    (map[key] ??= <ActivityEntry>[]).add(e);
   }
 
   final keys = map.keys.toList()..sort((a, b) => b.compareTo(a));
-
   final today = _dateOnly(DateTime.now());
   final yesterday = today.subtract(const Duration(days: 1));
   final last7Start = today.subtract(const Duration(days: 6));
@@ -999,17 +539,16 @@ List<_ActivityRow> _buildRows(List<ActivityEntry> entries) {
       titleRight: _prettyDate(day),
       topGap: i == 0 ? 0 : 16,
     ));
-
     final items = map[day]!..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    for (final entry in items) {
-      rows.add(_ActivityRow.entry(entry));
+    for (final e in items) {
+      rows.add(_ActivityRow.entry(e));
     }
   }
   return rows;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Group header row
+// Group Header Row
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _GroupHeaderRow extends StatelessWidget {
@@ -1018,7 +557,6 @@ class _GroupHeaderRow extends StatelessWidget {
     required this.titleRight,
     required this.topGap,
   });
-
   final String titleLeft;
   final String titleRight;
   final double topGap;
@@ -1032,27 +570,432 @@ class _GroupHeaderRow extends StatelessWidget {
       padding: EdgeInsets.only(top: topGap, bottom: 12),
       child: Column(
         children: [
-          Row(
-            children: [
-              Text(
-                titleLeft,
+          Row(children: [
+            Text(titleLeft,
                 style: t.labelMedium?.copyWith(
-                  color: isToday ? AppColors.primary : AppColors.muted,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                titleRight,
-                style: t.titleMedium?.copyWith(color: AppColors.muted),
-              ),
-            ],
-          ),
+                    color: isToday ? AppColors.primary : AppColors.muted)),
+            const Spacer(),
+            Text(titleRight,
+                style: t.titleMedium?.copyWith(color: AppColors.muted)),
+          ]),
           const SizedBox(height: 10),
           const Divider(height: 1),
           const SizedBox(height: 12),
         ],
       ),
     );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Expandable Activity Card
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _ExpandableActivityCard extends StatelessWidget {
+  const _ExpandableActivityCard({
+    required this.entry,
+    required this.expanded,
+    required this.radiusXl,
+  });
+
+  final ActivityEntry entry;
+  final ValueNotifier<bool> expanded;
+  final double radiusXl;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+
+    final stripColor = _stripColorFor(entry.action);
+    final badgeIcon = _badgeIconFor(entry.action);
+    final initials = _initials(entry.actorName);
+    final timeText = _formatTime(context, entry.createdAt);
+    final canExpand = entry.hasExpandableContent;
+
+    final userNameStyle = t.titleMedium?.copyWith(
+      fontSize: 17,
+      fontWeight: FontWeight.w800,
+      color: AppColors.ink,
+    );
+
+    return ValueListenableBuilder<bool>(
+      valueListenable: expanded,
+      builder: (context, isOpen, _) {
+        return Material(
+          color: Colors.white,
+          elevation: 2,
+          shadowColor: const Color(0x14000000),
+          borderRadius: BorderRadius.circular(radiusXl),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: canExpand ? () => expanded.value = !expanded.value : null,
+            splashFactory: NoSplash.splashFactory,
+            hoverColor: Colors.transparent,
+            highlightColor: Colors.transparent,
+            child: Column(
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(width: 6, height: 84, color: stripColor),
+                    const SizedBox(width: 14),
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        // ✅ Always initials from actor name
+                        CircleAvatar(
+                          radius: 22,
+                          backgroundColor: AppColors.background,
+                          child: Text(
+                            initials,
+                            style: t.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        // ✅ Badge snug at bottom-right of avatar
+                        Positioned(
+                          right: -4,
+                          bottom: -3,
+                          child: Container(
+                            width: 18,
+                            height: 18,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(color: AppColors.outline),
+                            ),
+                            child:
+                                Icon(badgeIcon, size: 12, color: stripColor),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(entry.actorName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: userNameStyle),
+                            const SizedBox(height: 4),
+                            // ✅ summary comes from backend
+                            Text(
+                              entry.summary,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style:
+                                  t.bodyMedium?.copyWith(color: AppColors.ink),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(timeText,
+                              style: t.bodyMedium
+                                  ?.copyWith(color: AppColors.muted)),
+                          const SizedBox(height: 8),
+                          if (canExpand)
+                            Icon(
+                              isOpen
+                                  ? Icons.keyboard_arrow_up_rounded
+                                  : Icons.keyboard_arrow_down_rounded,
+                              color: AppColors.muted,
+                            )
+                          else
+                            const SizedBox(height: 24),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                if (canExpand)
+                  AnimatedCrossFade(
+                    crossFadeState: isOpen
+                        ? CrossFadeState.showSecond
+                        : CrossFadeState.showFirst,
+                    duration: const Duration(milliseconds: 160),
+                    firstChild: const SizedBox.shrink(),
+                    secondChild: _buildExpandedContent(entry),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Strip color / badge icon per action
+// ═══════════════════════════════════════════════════════════════════════════
+
+Color _stripColorFor(String action) {
+  switch (action) {
+    case 'checkout':
+      return const Color(0xFF2F6FED);
+    case 'return':
+      return AppColors.primary;
+    case 'bucket_created':
+    case 'user_created':
+      return AppColors.primary;
+    case 'bucket_updated':
+    case 'user_updated':
+    case 'item_updated':
+      return const Color(0xFFFF9800);
+    case 'bucket_deleted':
+    case 'user_deleted':
+      return const Color(0xFFD92D20);
+    case 'item_resolved':
+      return const Color(0xFF7C3AED);
+    default:
+      return AppColors.muted;
+  }
+}
+
+IconData _badgeIconFor(String action) {
+  switch (action) {
+    case 'checkout':
+      return Icons.arrow_downward_rounded;
+    case 'return':
+      return Icons.arrow_upward_rounded;
+    case 'bucket_created':
+      return Icons.add_rounded;
+    case 'bucket_updated':
+      return Icons.edit_rounded;
+    case 'bucket_deleted':
+      return Icons.delete_rounded;
+    case 'user_created':
+      return Icons.person_add_rounded;
+    case 'user_updated':
+      return Icons.edit_rounded;
+    case 'user_deleted':
+      return Icons.person_remove_rounded;
+    case 'item_resolved':
+      return Icons.gavel_rounded;
+    default:
+      return Icons.info_rounded;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Expanded Content Builder
+// ═══════════════════════════════════════════════════════════════════════════
+
+Widget _buildExpandedContent(ActivityEntry entry) {
+  switch (entry.action) {
+    case 'checkout':
+    case 'return':
+      return _CheckoutReturnDetails(items: entry.items);
+    case 'bucket_created':
+      return _BucketCreatedDetails(items: entry.items);
+    case 'bucket_updated':
+    case 'user_updated':
+      return _ChangeListDetails(changes: entry.changes);
+    default:
+      return const SizedBox.shrink();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Checkout / Return detail lines
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _CheckoutReturnDetails extends StatelessWidget {
+  const _CheckoutReturnDetails({required this.items});
+  final List<ActivityItemDetail> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final qtyStyle = t.bodyMedium?.copyWith(
+        fontSize: 14,
+        fontWeight: FontWeight.w900,
+        color: AppColors.ink,
+        height: 1.1);
+    final itemStyle = t.bodyLarge?.copyWith(
+        fontSize: 15,
+        fontWeight: FontWeight.w800,
+        color: AppColors.ink,
+        height: 1.2);
+    final subStyle = t.bodyMedium
+        ?.copyWith(fontSize: 13, color: AppColors.muted, height: 1.25);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+      decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: AppColors.outline))),
+      child: Column(
+        children: [
+          for (int i = 0; i < items.length; i++) ...[
+            if (i != 0) const SizedBox(height: 14),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    SizedBox(
+                      width: 34,
+                      child: Text("${items[i].quantity}×",
+                          textAlign: TextAlign.right, style: qtyStyle),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                        child: Text(items[i].itemName,
+                            style: itemStyle, softWrap: true)),
+                  ],
+                ),
+                if (items[i].bucketName != null)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 46),
+                    child: Text("from ${items[i].bucketName}",
+                        style: subStyle, softWrap: true),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bucket Created detail (items added)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _BucketCreatedDetails extends StatelessWidget {
+  const _BucketCreatedDetails({required this.items});
+  final List<ActivityItemDetail> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final changeStyle = t.bodyMedium?.copyWith(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        color: AppColors.ink,
+        height: 1.35);
+    final labelStyle = t.bodyMedium?.copyWith(
+        fontSize: 14,
+        fontWeight: FontWeight.w700,
+        color: AppColors.primary,
+        height: 1.35);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+      decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: AppColors.outline))),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (int i = 0; i < items.length; i++) ...[
+            if (i != 0) const SizedBox(height: 6),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("added ", style: labelStyle),
+                Expanded(
+                  child: Text("${items[i].quantity}× ${items[i].itemName}",
+                      style: changeStyle),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Change List (bucket update / user update)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _ChangeListDetails extends StatelessWidget {
+  const _ChangeListDetails({required this.changes});
+  final List<ActivityChangeDetail> changes;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final changeStyle = t.bodyMedium?.copyWith(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        color: AppColors.ink,
+        height: 1.35);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+      decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: AppColors.outline))),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (int i = 0; i < changes.length; i++) ...[
+            if (i != 0) const SizedBox(height: 6),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _changeIcon(changes[i].kind),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: Text(changes[i].description, style: changeStyle)),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _changeIcon(String kind) {
+    final Color color;
+    final IconData icon;
+
+    switch (kind) {
+      case 'renamed':
+      case 'name_changed':
+        color = const Color(0xFFFF9800);
+        icon = Icons.swap_horiz_rounded;
+      case 'item_added':
+        color = AppColors.primary;
+        icon = Icons.add_rounded;
+      case 'item_removed':
+        color = const Color(0xFFD92D20);
+        icon = Icons.remove_rounded;
+      case 'item_increased':
+        color = AppColors.primary;
+        icon = Icons.trending_up_rounded;
+      case 'item_decreased':
+        color = const Color(0xFFFF9800);
+        icon = Icons.trending_down_rounded;
+      case 'role_changed':
+        color = const Color(0xFF2F6FED);
+        icon = Icons.shield_rounded;
+      case 'password_reset':
+        color = AppColors.muted;
+        icon = Icons.lock_reset_rounded;
+      default:
+        color = AppColors.muted;
+        icon = Icons.info_rounded;
+    }
+
+    return Icon(icon, size: 16, color: color);
   }
 }
 
@@ -1078,7 +1021,10 @@ String _formatTime(BuildContext context, DateTime dt) {
   );
 }
 
-DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
+DateTime _dateOnly(DateTime dt) {
+  final local = dt.toLocal();
+  return DateTime(local.year, local.month, local.day);
+}
 
 String _prettyDate(DateTime d) {
   const m = [
@@ -1094,49 +1040,4 @@ String _weekdayName(DateTime d) {
     "FRIDAY", "SATURDAY", "SUNDAY",
   ];
   return w[d.weekday - 1];
-}
-
-Color _stripColor(ActivityEntry entry) {
-  const blue = Color(0xFF2F6FED);
-  const red = Color(0xFFE53935);
-  const orange = Color(0xFFF57C00);
-  const purple = Color(0xFF7C4DFF);
-
-  if (entry.isCheckout) return blue;
-  if (entry.isReturn) return AppColors.primary;
-  if (entry.kind == 'resolved_lost') return red;
-  if (entry.kind == 'resolved_damaged') return orange;
-  if (entry.isBucketEvent) return purple;
-  if (entry.isUserEvent) return const Color(0xFF00897B);
-  return AppColors.muted;
-}
-
-IconData _actionIcon(ActivityEntry entry) {
-  switch (entry.kind) {
-    case 'checkout':
-      return Icons.arrow_upward_rounded;
-    case 'return':
-      return Icons.arrow_downward_rounded;
-    case 'resolved_lost':
-      return Icons.search_off_rounded;
-    case 'resolved_damaged':
-      return Icons.broken_image_rounded;
-    case 'bucket_created':
-    case 'user_created':
-      return Icons.add_rounded;
-    case 'bucket_updated':
-    case 'user_updated':
-      return Icons.edit_rounded;
-    case 'bucket_deleted':
-    case 'user_deleted':
-      return Icons.delete_rounded;
-    default:
-      return Icons.info_rounded;
-  }
-}
-
-IconData _entityIcon(ActivityEntry entry) {
-  if (entry.isBucketEvent) return Icons.category_rounded;
-  if (entry.isUserEvent) return Icons.person_rounded;
-  return Icons.info_rounded;
 }
