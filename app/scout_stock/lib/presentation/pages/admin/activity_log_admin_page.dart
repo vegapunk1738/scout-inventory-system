@@ -31,7 +31,7 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
     super.initState();
     _scrollCtrl.addListener(_onScroll);
     _pollTimer = Timer.periodic(
-      const Duration(seconds: 1),
+      const Duration(seconds: 5),
       (_) => ref.read(activityProvider.notifier).poll(),
     );
   }
