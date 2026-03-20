@@ -54,6 +54,7 @@ class ActivityState {
     this.loadingMore = false,
     this.query = '',
     this.filter = ActivityFilter.all,
+    this.pollNewIds = const {},
     this.error,
   });
 
@@ -63,6 +64,8 @@ class ActivityState {
   final bool loadingMore;
   final String query;
   final ActivityFilter filter;
+  /// IDs of entries that just arrived via polling — used to trigger entrance animation.
+  final Set<String> pollNewIds;
   final String? error;
 
   ActivityState copyWith({
@@ -72,6 +75,7 @@ class ActivityState {
     bool? loadingMore,
     String? query,
     ActivityFilter? filter,
+    Set<String>? pollNewIds,
     String? error,
   }) {
     return ActivityState(
@@ -81,6 +85,7 @@ class ActivityState {
       loadingMore: loadingMore ?? this.loadingMore,
       query: query ?? this.query,
       filter: filter ?? this.filter,
+      pollNewIds: pollNewIds ?? this.pollNewIds,
       error: error,
     );
   }
@@ -189,12 +194,22 @@ class ActivityNotifier extends Notifier<ActivityState> {
 
       if (newItems.isEmpty) return;
 
+      final newIds = newItems.map((e) => e.id).toSet();
+
       state = state.copyWith(
         entries: [...newItems, ...state.entries],
+        pollNewIds: {...state.pollNewIds, ...newIds},
       );
     } catch (_) {
       // Silently ignore poll errors — next tick will retry
     }
+  }
+
+  /// Called by the UI after a poll-inserted card finishes its entrance animation.
+  void markAnimated(String id) {
+    if (!state.pollNewIds.contains(id)) return;
+    final updated = Set<String>.from(state.pollNewIds)..remove(id);
+    state = state.copyWith(pollNewIds: updated);
   }
 
   Future<ActivityPageResponse> _fetchPage({

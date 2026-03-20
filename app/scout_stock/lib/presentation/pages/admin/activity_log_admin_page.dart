@@ -211,7 +211,9 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
                             );
                           }
                           final entry = row.entry!;
-                          return Padding(
+                          final isPollNew =
+                              activity.pollNewIds.contains(entry.id);
+                          final card = Padding(
                             padding: const EdgeInsets.only(bottom: 12),
                             child: RepaintBoundary(
                               child: _ExpandableActivityCard(
@@ -221,6 +223,16 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
                               ),
                             ),
                           );
+                          if (isPollNew) {
+                            return _AnimatedEntrance(
+                              key: ValueKey('anim_${entry.id}'),
+                              onComplete: () => ref
+                                  .read(activityProvider.notifier)
+                                  .markAnimated(entry.id),
+                              child: card,
+                            );
+                          }
+                          return card;
                         },
                         childCount: rows.length,
                         addAutomaticKeepAlives: false,
@@ -1254,6 +1266,66 @@ class _ChangeLineInfo {
   final String label;
   final IconData icon;
   final Color color;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Animated Entrance — fade + slide for poll-inserted cards
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _AnimatedEntrance extends StatefulWidget {
+  const _AnimatedEntrance({
+    super.key,
+    required this.child,
+    required this.onComplete,
+  });
+
+  final Widget child;
+  final VoidCallback onComplete;
+
+  @override
+  State<_AnimatedEntrance> createState() => _AnimatedEntranceState();
+}
+
+class _AnimatedEntranceState extends State<_AnimatedEntrance>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _fade;
+  late final Animation<Offset> _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _slide = Tween<Offset>(
+      begin: const Offset(0, -0.15),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+
+    _ctrl.forward().then((_) {
+      if (mounted) widget.onComplete();
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SlideTransition(
+      position: _slide,
+      child: FadeTransition(
+        opacity: _fade,
+        child: widget.child,
+      ),
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
